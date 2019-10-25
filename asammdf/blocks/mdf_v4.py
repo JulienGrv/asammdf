@@ -650,6 +650,8 @@ class MDF4(object):
             if group.raw_can:
                 try:
                     _sig = self.get("CAN_DataFrame", group=i, ignore_invalidation_bits=True)
+                except MemoryError:
+                    continue
                 except ValueError:
                     continue
                 except MdfException:
