@@ -1283,7 +1283,7 @@ def master_using_raster(mdf, raster, endpoint=False):
     return master
 
 
-def extract_can_signal(signal, payload):
+def extract_can_signal(signal, payload, conversion=False):
     vals = payload
 
     big_endian = False if signal.is_little_endian else True
@@ -1353,7 +1353,7 @@ def extract_can_signal(signal, payload):
     if signed:
         vals = as_non_byte_sized_signed_int(vals, bit_count)
 
-    if (signal.factor, signal.offset) != (1, 0):
+    if conversion and (signal.factor, signal.offset) != (1, 0):
         vals = vals * float(signal.factor)
         vals += float(signal.offset)
 

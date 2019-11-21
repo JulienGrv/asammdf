@@ -3764,7 +3764,7 @@ class MDF(object):
                         'CAN_DataFrame.ID',
                         group=i,
                         data=fragment,
-                    ) & 0x1FFFFFFF
+                    ).astype(int) & 0x1FFFFFFF
 
                     if is_j1939:
                         ps = (msg_ids.samples >> 8) & 0xFF
