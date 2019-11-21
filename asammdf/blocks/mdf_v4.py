@@ -694,6 +694,8 @@ class MDF4(object):
                             try:
                                 can_msg = db.frameById(message_id)
                             except AttributeError:
+                                print(db)
+                                print(all_can_ids)
                                 can_msg = db.frame_by_id(canmatrix.ArbitrationId(message_id))
 
                             if can_msg:
@@ -983,13 +985,13 @@ class MDF4(object):
             comment = channel_group.acq_source.comment
             if comment:
                 try:
-                comment_xml = ET.fromstring(comment)
-                common_properties = comment_xml.find(".//common_properties")
-                for e in common_properties:
-                    name = e.get("name")
-                    if name == "ChannelNo":
-                        grp.CAN_id = f"CAN{e.text}"
-                        break
+                    comment_xml = ET.fromstring(comment)
+                    common_properties = comment_xml.find(".//common_properties")
+                    for e in common_properties:
+                        name = e.get("name")
+                        if name == "ChannelNo":
+                            grp.CAN_id = f"CAN{e.text}"
+                            break
                 except ET.ParseError:
                     pass
 
