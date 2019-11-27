@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import os
 from traceback import format_exc
+from time import perf_counter
 
 import psutil
 from natsort import natsorted
@@ -83,12 +84,18 @@ class FileWidget(Ui_file_widget, QtWidgets.QWidget):
         progress.setWindowIcon(icon)
         progress.show()
 
-        if file_name.suffix.lower() == ".erg":
-            progress.setLabelText("Converting from erg to mdf")
-            try:
-                from mfile import ERG
+        if file_name.suffix.lower() in (".erg", ".bsig"):
 
-                mdf_path = ERG(file_name).export_mdf().save(file_name.with_suffix('.tmp.mf4'))
+            extension = file_name.suffix.lower().strip(".")
+            progress.setLabelText(f"Converting from {extension} to mdf")
+            try:
+                from mfile import ERG, BSIG
+
+                if file_name.suffix.lower() == ".erg":
+                    cls = ERG
+                else:
+                    cls = BSIG
+                mdf_path = cls(file_name).export_mdf().save(file_name.with_suffix('.tmp.mf4'))
                 self.mdf = MDF(mdf_path)
             except:
                 print(format_exc())
@@ -169,10 +176,10 @@ class FileWidget(Ui_file_widget, QtWidgets.QWidget):
         self.channel_view.setCurrentIndex(0)
         self.channel_view.currentIndexChanged.connect(self._update_channel_tree)
 
-        self.channels_tree = TreeWidget(channel_and_search)
+        self.channels_tree = TreeWidget(self)
         self.channels_tree.setDragEnabled(True)
 
-        self.filter_tree = TreeWidget()
+        self.filter_tree = TreeWidget(self)
 
         vbox = QtWidgets.QVBoxLayout(channel_and_search)
         vbox.setSpacing(2)
@@ -266,48 +273,12 @@ class FileWidget(Ui_file_widget, QtWidgets.QWidget):
         self.filter_tree.setHeaderLabel("Channels")
         self.filter_tree.setToolTip("Double click channel to see extended information")
 
-        for i, group in enumerate(self.mdf.groups):
-
-            filter_channel_group = QtWidgets.QTreeWidgetItem()
-            filter_channel_group.setText(0, f"Channel group {i}")
-            filter_channel_group.setFlags(
-                filter_channel_group.flags() | QtCore.Qt.ItemIsTristate | QtCore.Qt.ItemIsUserCheckable
-            )
-            filter_channel_group.setCheckState(0, QtCore.Qt.Unchecked)
-
-            self.filter_tree.addTopLevelItem(filter_channel_group)
-
-            filter_children = []
-
-            for j, ch in enumerate(group.channels):
-                entry = i, j
-
-                name = ch.name
-
-                channel = TreeItem(entry, name)
-                channel.setText(0, name)
-                filter_children.append(channel)
-                channel.setCheckState(0, QtCore.Qt.Unchecked)
-
-            if self.mdf.version >= "4.00":
-                for j, ch in enumerate(group.logging_channels, 1):
-                    name = ch.name
-                    entry = i, -j
-
-                    channel = TreeItem(entry, name)
-                    channel.setText(0, name)
-                    filter_children.append(channel)
-
-            filter_channel_group.addChildren(filter_children)
-
-            del filter_children
-
-            progress.setValue(37 + int(53 * (i + 1) / groups_nr / 2))
-
         self.channel_view.setCurrentIndex(-1)
         self.channel_view.setCurrentText(
             self._settings.value('channels_view', 'Internal file structure')
         )
+
+        progress.setValue(70)
 
         self.raster_channel.addItems(channels_db_items)
 
@@ -884,7 +855,11 @@ class FileWidget(Ui_file_widget, QtWidgets.QWidget):
     def load_channel_list(self, event=None, file_name=None):
         if file_name is None:
             file_name, _ = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Select channel list file", "", "TXT files (*.txt)"
+                self,
+                "Select channel list file",
+                "",
+                "Config file (*.cfg);;TXT files (*.txt);;All file types (*.cfg *.txt)",
+                "All file types (*.cfg *.txt)"
             )
 
         if file_name:
@@ -1097,6 +1072,10 @@ class FileWidget(Ui_file_widget, QtWidgets.QWidget):
         self.mdf.close()
         if self.file_name.suffix.lower() in (".dl3", ".erg"):
             mdf_name.unlink()
+        self.channels_tree.clear()
+        self.filter_tree.clear()
+
+        self.mdf = None
 
     def convert(self, event):
         version = self.convert_format.currentText()

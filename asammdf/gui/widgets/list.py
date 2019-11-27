@@ -198,7 +198,7 @@ class ListWidget(QtWidgets.QListWidget):
             )
             self.itemWidget(item).keyPressEvent(event)
 
-        if action.text() == "Enable all":
+        elif action.text() == "Enable all":
             for i in range(self.count()):
                 item = self.item(i)
                 widget = self.itemWidget(item)
@@ -284,6 +284,8 @@ class ListWidget(QtWidgets.QListWidget):
 
 class MinimalListWidget(QtWidgets.QListWidget):
 
+    itemsDeleted = QtCore.pyqtSignal(list)
+
     def __init__(self, *args, **kwargs):
 
         super().__init__(*args, **kwargs)
@@ -292,6 +294,9 @@ class MinimalListWidget(QtWidgets.QListWidget):
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
 
         self.setAlternatingRowColors(True)
+
+        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.open_menu)
 
         self.setAcceptDrops(True)
         self.show()
@@ -305,5 +310,29 @@ class MinimalListWidget(QtWidgets.QListWidget):
                 row = self.row(item)
                 deleted.append(row)
                 self.takeItem(row)
+            if deleted:
+                self.itemsDeleted.emit(deleted)
         else:
             super().keyPressEvent(event)
+
+    def open_menu(self, position):
+
+        item = self.itemAt(position)
+        if item is None:
+            return
+
+        menu = QtWidgets.QMenu()
+        menu.addAction(self.tr("Delete (Del)"))
+
+        action = menu.exec_(self.viewport().mapToGlobal(position))
+
+        if action is None:
+            return
+
+        if action.text() == "Delete (Del)":
+            event = QtGui.QKeyEvent(
+                QtCore.QEvent.KeyPress,
+                QtCore.Qt.Key_Delete,
+                QtCore.Qt.NoModifier,
+            )
+            self.keyPressEvent(event)
