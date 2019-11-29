@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file 'd:\DSUsers\uidn3651\02__PythonWorkspace\asammdf\asammdf\gui\ui\search_dialog.ui'
+# Form implementation generated from reading ui file 'search_dialog.ui'
 #
-# Created by: PyQt5 UI code generator 5.12.1
+# Created by: PyQt5 UI code generator 5.13.1
 #
 # WARNING! All changes made in this file will be lost!
+
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -30,14 +31,16 @@ class Ui_SearchDialog(object):
         self.match_kind.addItem("")
         self.match_kind.addItem("")
         self.grid_layout.addWidget(self.match_kind, 0, 0, 1, 1)
-        self.selection = ListWidget(SearchDialog)
+        self.selection = MinimalListWidget(SearchDialog)
         self.selection.setObjectName("selection")
         self.grid_layout.addWidget(self.selection, 5, 2, 4, 4)
         self.status = QtWidgets.QLabel(SearchDialog)
         self.status.setText("")
         self.status.setObjectName("status")
         self.grid_layout.addWidget(self.status, 10, 0, 1, 1)
-        spacerItem = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
+        spacerItem = QtWidgets.QSpacerItem(
+            20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding
+        )
         self.grid_layout.addItem(spacerItem, 6, 1, 1, 1)
         self.label = QtWidgets.QLabel(SearchDialog)
         self.label.setObjectName("label")
@@ -54,12 +57,16 @@ class Ui_SearchDialog(object):
         self.cancel_btn = QtWidgets.QPushButton(SearchDialog)
         self.cancel_btn.setObjectName("cancel_btn")
         self.horizontalLayout.addWidget(self.cancel_btn)
-        spacerItem1 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem1 = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum
+        )
         self.horizontalLayout.addItem(spacerItem1)
         self.add_window_btn = QtWidgets.QPushButton(SearchDialog)
         self.add_window_btn.setObjectName("add_window_btn")
         self.horizontalLayout.addWidget(self.add_window_btn)
-        spacerItem2 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem2 = QtWidgets.QSpacerItem(
+            40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum
+        )
         self.horizontalLayout.addItem(spacerItem2)
         self.apply_btn = QtWidgets.QPushButton(SearchDialog)
         self.apply_btn.setObjectName("apply_btn")
@@ -87,5 +94,5 @@ class Ui_SearchDialog(object):
         self.apply_btn.setText(_translate("SearchDialog", "Apply"))
 
 
-from asammdf.gui.widgets.list import ListWidget
+from asammdf.gui.widgets.list import MinimalListWidget
 from . import resource_rc

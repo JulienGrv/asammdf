@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
+import json
+from struct import pack
 
 from PyQt5 import QtGui
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
+
+from ..utils import extract_mime_names
 
 
 class NumericTreeWidget(QtWidgets.QTreeWidget):
@@ -33,13 +37,18 @@ class NumericTreeWidget(QtWidgets.QTreeWidget):
                 else:
                     item.setCheckState(0, QtCore.Qt.Checked)
             else:
-                if any(item.checkState(0) == QtCore.Qt.Unchecked for item in selected_items):
+                if any(
+                    item.checkState(0) == QtCore.Qt.Unchecked for item in selected_items
+                ):
                     checked = QtCore.Qt.Checked
                 else:
                     checked = QtCore.Qt.Unchecked
                 for item in selected_items:
                     item.setCheckState(0, checked)
-        elif event.key() == QtCore.Qt.Key_Delete and event.modifiers() == QtCore.Qt.NoModifier:
+        elif (
+            event.key() == QtCore.Qt.Key_Delete
+            and event.modifiers() == QtCore.Qt.NoModifier
+        ):
             selected = reversed(self.selectedItems())
             names = [item.text(0) for item in selected]
             for item in selected:
@@ -52,27 +61,49 @@ class NumericTreeWidget(QtWidgets.QTreeWidget):
         else:
             super().keyPressEvent(event)
 
+    def startDrag(self, supportedActions):
+        selected_items = self.selectedItems()
+
+        mimeData = QtCore.QMimeData()
+
+        data = []
+
+        for item in selected_items:
+
+            name = item.name.encode("utf-8")
+            entry = item.entry
+
+            if entry == (-1, -1):
+                info = {
+                    "name": name,
+                    "computation": {},
+                }
+                info = json.dumps(info).encode("utf-8")
+            else:
+                info = name
+
+            data.append(pack(f"<3Q{len(info)}s", entry[0], entry[1], len(info), info))
+
+        mimeData.setData(
+            "application/octet-stream-asammdf", QtCore.QByteArray(b"".join(data))
+        )
+
+        drag = QtGui.QDrag(self)
+        drag.setMimeData(mimeData)
+        drag.exec(QtCore.Qt.CopyAction)
+
     def dragEnterEvent(self, e):
         e.accept()
 
     def dropEvent(self, e):
+
         if e.source() is self:
             super().dropEvent(e)
             self.items_rearranged.emit()
         else:
             data = e.mimeData()
-            if data.hasFormat('application/x-qabstractitemmodeldatalist'):
-                if data.hasFormat('text/plain'):
-                    names = [
-                        name.strip('"\'')
-                        for name in data.text().strip('[]').split(', ')
-                    ]
-                else:
-                    model = QtGui.QStandardItemModel()
-                    model.dropMimeData(data, QtCore.Qt.CopyAction, 0,0, QtCore.QModelIndex())
-
-                    names = [
-                        model.item(row, 0).text()
-                        for row in range(model.rowCount())
-                    ]
+            if data.hasFormat("application/octet-stream-asammdf"):
+                names = extract_mime_names(data)
                 self.add_channels_request.emit(names)
+            else:
+                super().dropEvent(e)
