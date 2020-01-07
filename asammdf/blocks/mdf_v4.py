@@ -700,185 +700,185 @@ class MDF4(object):
                     else:
                         break
 
-        self._sort()
+        # self._sort()
 
-        for grp in self.groups:
-            channels = grp.channels
-            if (
-                len(channels) == 1
-                and channels[0].dtype_fmt.itemsize == grp.channel_group.samples_byte_nr
-            ):
-                grp.single_channel_dtype = channels[0].dtype_fmt
+        # for grp in self.groups:
+        #     channels = grp.channels
+        #     if (
+        #         len(channels) == 1
+        #         and channels[0].dtype_fmt.itemsize == grp.channel_group.samples_byte_nr
+        #     ):
+        #         grp.single_channel_dtype = channels[0].dtype_fmt
 
-        self._process_can_logging()
+        # self._process_can_logging()
 
-        # append indexes of groups that contain raw CAN bus logging and
-        # store signals and metadata that will be used to create the new
-        # groups.
-        raw_can = []
-        processed_can = []
-        for i, group in enumerate(self.groups):
-            if group.CAN_logging:
-                if group.CAN_id not in self.can_logging_db:
-                    self.can_logging_db[group.CAN_id] = {}
-                message_id = group.message_id
-                if message_id is not None:
-                    for id_ in message_id:
-                        self.can_logging_db[group.CAN_id][id_] = i
-            else:
-                continue
+        # # append indexes of groups that contain raw CAN bus logging and
+        # # store signals and metadata that will be used to create the new
+        # # groups.
+        # raw_can = []
+        # processed_can = []
+        # for i, group in enumerate(self.groups):
+        #     if group.CAN_logging:
+        #         if group.CAN_id not in self.can_logging_db:
+        #             self.can_logging_db[group.CAN_id] = {}
+        #         message_id = group.message_id
+        #         if message_id is not None:
+        #             for id_ in message_id:
+        #                 self.can_logging_db[group.CAN_id][id_] = i
+        #     else:
+        #         continue
 
-            if group.raw_can:
-                try:
-                    _sig = self.get(
-                        "CAN_DataFrame", group=i, ignore_invalidation_bits=True
-                    )
-                except MdfException:
-                    continue
+        #     if group.raw_can:
+        #         try:
+        #             _sig = self.get(
+        #                 "CAN_DataFrame", group=i, ignore_invalidation_bits=True
+        #             )
+        #         except MdfException:
+        #             continue
 
-                can_ids = Signal(
-                    _sig.samples["CAN_DataFrame.ID"], _sig.timestamps, name="can_ids",
-                )
+        #         can_ids = Signal(
+        #             _sig.samples["CAN_DataFrame.ID"], _sig.timestamps, name="can_ids",
+        #         )
 
-                all_can_ids = unique(can_ids.samples).tolist()
+        #         all_can_ids = unique(can_ids.samples).tolist()
 
-                if all_can_ids:
-                    group.message_id = set()
-                    for message_id in all_can_ids:
-                        if message_id > 0x80000000:
-                            message_id -= 0x80000000
+        #         if all_can_ids:
+        #             group.message_id = set()
+        #             for message_id in all_can_ids:
+        #                 if message_id > 0x80000000:
+        #                     message_id -= 0x80000000
 
-                        self.can_logging_db[group.CAN_id][message_id] = i
-                        group.message_id.add(message_id)
+        #                 self.can_logging_db[group.CAN_id][message_id] = i
+        #                 group.message_id.add(message_id)
 
-                payload = _sig.samples["CAN_DataFrame.DataBytes"]
+        #         payload = _sig.samples["CAN_DataFrame.DataBytes"]
 
-                attachment = _sig.attachment
-                if (
-                    attachment
-                    and attachment[0]
-                    and attachment[1].name.lower().endswith(("dbc", "arxml"))
-                ):
-                    attachment, at_name = attachment
+        #         attachment = _sig.attachment
+        #         if (
+        #             attachment
+        #             and attachment[0]
+        #             and attachment[1].name.lower().endswith(("dbc", "arxml"))
+        #         ):
+        #             attachment, at_name = attachment
 
-                    db = load_can_database(at_name, attachment)
+        #             db = load_can_database(at_name, attachment)
 
-                    if db:
-                        try:
-                            board_units = set(bu.name for bu in db.boardUnits)
-                        except AttributeError:
-                            board_units = set(bu.name for bu in db.ecus)
+        #             if db:
+        #                 try:
+        #                     board_units = set(bu.name for bu in db.boardUnits)
+        #                 except AttributeError:
+        #                     board_units = set(bu.name for bu in db.ecus)
 
-                        cg_source = group.channel_group.acq_source
+        #                 cg_source = group.channel_group.acq_source
 
-                        all_message_info_extracted = True
-                        for message_id in all_can_ids:
-                            self.can_logging_db[group.CAN_id][message_id] = i
-                            sigs = []
-                            try:
-                                can_msg = db.frameById(message_id)
-                            except AttributeError:
-                                can_msg = db.frame_by_id(
-                                    canmatrix.ArbitrationId(message_id)
-                                )
+        #                 all_message_info_extracted = True
+        #                 for message_id in all_can_ids:
+        #                     self.can_logging_db[group.CAN_id][message_id] = i
+        #                     sigs = []
+        #                     try:
+        #                         can_msg = db.frameById(message_id)
+        #                     except AttributeError:
+        #                         can_msg = db.frame_by_id(
+        #                             canmatrix.ArbitrationId(message_id)
+        #                         )
 
-                            if can_msg:
-                                for transmitter in can_msg.transmitters:
-                                    if transmitter in board_units:
-                                        break
-                                else:
-                                    transmitter = ""
-                                message_name = can_msg.name
+        #                     if can_msg:
+        #                         for transmitter in can_msg.transmitters:
+        #                             if transmitter in board_units:
+        #                                 break
+        #                         else:
+        #                             transmitter = ""
+        #                         message_name = can_msg.name
 
-                                source = SignalSource(
-                                    transmitter,
-                                    can_msg.name,
-                                    "",
-                                    v4c.SOURCE_BUS,
-                                    v4c.BUS_TYPE_CAN,
-                                )
+        #                         source = SignalSource(
+        #                             transmitter,
+        #                             can_msg.name,
+        #                             "",
+        #                             v4c.SOURCE_BUS,
+        #                             v4c.BUS_TYPE_CAN,
+        #                         )
 
-                                idx = nonzero(can_ids.samples == message_id)[0]
-                                data = payload[idx]
-                                t = can_ids.timestamps[idx].copy()
-                                if can_ids.invalidation_bits is not None:
-                                    invalidation_bits = can_ids.invalidation_bits[idx]
-                                else:
-                                    invalidation_bits = None
+        #                         idx = nonzero(can_ids.samples == message_id)[0]
+        #                         data = payload[idx]
+        #                         t = can_ids.timestamps[idx].copy()
+        #                         if can_ids.invalidation_bits is not None:
+        #                             invalidation_bits = can_ids.invalidation_bits[idx]
+        #                         else:
+        #                             invalidation_bits = None
 
-                                for signal in sorted(
-                                    can_msg.signals, key=lambda x: x.name
-                                ):
+        #                         for signal in sorted(
+        #                             can_msg.signals, key=lambda x: x.name
+        #                         ):
 
-                                    sig_vals = extract_can_signal(signal, data)
+        #                             sig_vals = extract_can_signal(signal, data)
 
-                                    # conversion = ChannelConversion(
-                                    #     a=float(signal.factor),
-                                    #     b=float(signal.offset),
-                                    #     conversion_type=v4c.CONVERSION_TYPE_LIN,
-                                    # )
-                                    # conversion.unit = signal.unit or ""
-                                    sigs.append(
-                                        Signal(
-                                            sig_vals,
-                                            t,
-                                            name=signal.name,
-                                            conversion=None,
-                                            source=source,
-                                            unit=signal.unit,
-                                            raw=False,
-                                            invalidation_bits=invalidation_bits,
-                                        )
-                                    )
+        #                             # conversion = ChannelConversion(
+        #                             #     a=float(signal.factor),
+        #                             #     b=float(signal.offset),
+        #                             #     conversion_type=v4c.CONVERSION_TYPE_LIN,
+        #                             # )
+        #                             # conversion.unit = signal.unit or ""
+        #                             sigs.append(
+        #                                 Signal(
+        #                                     sig_vals,
+        #                                     t,
+        #                                     name=signal.name,
+        #                                     conversion=None,
+        #                                     source=source,
+        #                                     unit=signal.unit,
+        #                                     raw=False,
+        #                                     invalidation_bits=invalidation_bits,
+        #                                 )
+        #                             )
 
-                                processed_can.append(
-                                    [
-                                        sigs,
-                                        message_id,
-                                        message_name,
-                                        cg_source,
-                                        group.CAN_id,
-                                    ]
-                                )
-                            else:
-                                all_message_info_extracted = False
+        #                         processed_can.append(
+        #                             [
+        #                                 sigs,
+        #                                 message_id,
+        #                                 message_name,
+        #                                 cg_source,
+        #                                 group.CAN_id,
+        #                             ]
+        #                         )
+        #                     else:
+        #                         all_message_info_extracted = False
 
-                        if all_message_info_extracted:
-                            raw_can.append(i)
+        #                 if all_message_info_extracted:
+        #                     raw_can.append(i)
 
-        if processed_can:
+        # if processed_can:
 
-            for sigs, message_id, message_name, cg_source, can_id in processed_can:
-                self.append(
-                    sigs, "Extracted from raw CAN bus logging", common_timebase=True
-                )
-                group = self.groups[-1]
-                group.CAN_database = message_name != ""
-                group.CAN_logging = False
-                group.CAN_id = can_id
-                if message_id > 0:
-                    if message_id > 0x80000000:
-                        message_id -= 0x80000000
-                        group.extended_id = True
-                    else:
-                        group.extended_id = False
-                    group.message_name = message_name
-                    group.message_id = {message_id}
-                group.channel_group.acq_source = cg_source
-                group.data_group.comment = (
-                    f'From message {hex(message_id)}="{message_name}"'
-                )
+        #     for sigs, message_id, message_name, cg_source, can_id in processed_can:
+        #         self.append(
+        #             sigs, "Extracted from raw CAN bus logging", common_timebase=True
+        #         )
+        #         group = self.groups[-1]
+        #         group.CAN_database = message_name != ""
+        #         group.CAN_logging = False
+        #         group.CAN_id = can_id
+        #         if message_id > 0:
+        #             if message_id > 0x80000000:
+        #                 message_id -= 0x80000000
+        #                 group.extended_id = True
+        #             else:
+        #                 group.extended_id = False
+        #             group.message_name = message_name
+        #             group.message_id = {message_id}
+        #         group.channel_group.acq_source = cg_source
+        #         group.data_group.comment = (
+        #             f'From message {hex(message_id)}="{message_name}"'
+        #         )
 
-        self.can_logging_db = {}
+        # self.can_logging_db = {}
 
-        for i, group in enumerate(self.groups):
-            if not group.CAN_logging:
-                continue
-            if not group.CAN_id in self.can_logging_db:
-                self.can_logging_db[group.CAN_id] = {}
-            if group.message_id is not None:
-                for id_ in group.message_id:
-                    self.can_logging_db[group.CAN_id][id_] = i
+        # for i, group in enumerate(self.groups):
+        #     if not group.CAN_logging:
+        #         continue
+        #     if not group.CAN_id in self.can_logging_db:
+        #         self.can_logging_db[group.CAN_id] = {}
+        #     if group.message_id is not None:
+        #         for id_ in group.message_id:
+        #             self.can_logging_db[group.CAN_id][id_] = i
 
         # read events
         addr = self.header.first_event_addr
