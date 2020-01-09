@@ -11,11 +11,8 @@ from copy import deepcopy
 from struct import unpack
 from shutil import copy
 from pathlib import Path
-from time import perf_counter
 
-import canmatrix
 import numpy as np
-from numpy.core.defchararray import encode, decode
 import pandas as pd
 
 from .blocks.conversion_utils import from_dict
@@ -24,8 +21,6 @@ from .blocks.mdf_v3 import MDF3
 from .blocks.mdf_v4 import MDF4
 from .signal import Signal
 from .blocks.utils import (
-    CHANNEL_COUNT,
-    MERGE,
     MdfException,
     matlab_compatible,
     validate_version_argument,
@@ -55,7 +50,7 @@ from .blocks.v2_v3_blocks import ChannelExtension
 from .blocks.v4_blocks import SourceInformation
 from .blocks.v4_blocks import ChannelConversion as ChannelConversionV4
 from .blocks.v4_blocks import HeaderBlock as HeaderV4
-from .blocks.v4_blocks import ChannelArrayBlock, EventBlock
+from .blocks.v4_blocks import EventBlock
 from .blocks import v4_constants as v4c
 from .blocks import v2_v3_constants as v23c
 
@@ -358,128 +353,6 @@ class MDF(object):
                     event.scopes.append(group)
                     self.events.append(event)
 
-    def _included_channels(self, index, skip_master=True):
-        """ get the minimum channels needed to extract all information from the
-        channel group (for example keep onl the structure channel and exclude the
-        strucutre fields channels)
-
-        Parameters
-        ----------
-        index : int
-            channel group index
-
-        Returns
-        -------
-        included_channels : set
-            set of excluded channels
-
-        """
-        self._link_attributes()
-
-        group = self.groups[index]
-
-        included_channels = set(range(len(group.channels)))
-        master_index = self.masters_db.get(index, None)
-        if master_index is not None and skip_master:
-            included_channels.remove(master_index)
-
-        channels = group.channels
-
-        if self.version in MDF2_VERSIONS + MDF3_VERSIONS:
-            for dep in group.channel_dependencies:
-                if dep is None:
-                    continue
-                for gp_nr, ch_nr in dep.referenced_channels:
-                    if gp_nr == index:
-                        included_channels.remove(ch_nr)
-        else:
-            if group.CAN_logging:
-                found = True
-                where = (
-                    self.whereis("CAN_DataFrame")
-                    + self.whereis("CAN_ErrorFrame")
-                    + self.whereis("CAN_RemoteFrame")
-                )
-
-                for dg_cntr, ch_cntr in where:
-                    if dg_cntr == index:
-                        break
-                else:
-                    found = False
-                    #                    raise MdfException(
-                    #                        f"CAN_DataFrame or CAN_ErrorFrame not found in group {index}"
-                    #                    )
-                    group.CAN_logging = False
-
-                if found:
-                    channel = channels[ch_cntr]
-
-                    frame_bytes = range(
-                        channel.byte_offset,
-                        channel.byte_offset + channel.bit_count // 8,
-                    )
-
-                    for i, channel in enumerate(channels):
-                        if channel.byte_offset in frame_bytes:
-                            included_channels.remove(i)
-
-                    included_channels.add(ch_cntr)
-
-                    if group.CAN_database:
-                        dbc_addr = group.dbc_addr
-                        message_id = group.message_id
-                        for m_ in message_id:
-                            try:
-                                can_msg = self._dbc_cache[dbc_addr].frameById(m_)
-                            except AttributeError:
-                                can_msg = self._dbc_cache[dbc_addr].frame_by_id(
-                                    canmatrix.ArbitrationId(m_)
-                                )
-
-                            for i, _ in enumerate(can_msg.signals, 1):
-                                included_channels.add(-i)
-
-            for dependencies in group.channel_dependencies:
-                if dependencies is None:
-                    continue
-                if all(not isinstance(dep, ChannelArrayBlock) for dep in dependencies):
-                    for _, ch_nr in dependencies:
-                        try:
-                            included_channels.remove(ch_nr)
-                        except KeyError:
-                            pass
-                else:
-                    for dep in dependencies:
-                        for referenced_channels in (
-                            dep.axis_channels,
-                            dep.dynamic_size_channels,
-                            dep.input_quantity_channels,
-                        ):
-                            for gp_nr, ch_nr in referenced_channels:
-                                if gp_nr == index:
-                                    try:
-                                        included_channels.remove(ch_nr)
-                                    except KeyError:
-                                        pass
-
-                        if dep.output_quantity_channel:
-                            gp_nr, ch_nr = dep.output_quantity_channel
-                            if gp_nr == index:
-                                try:
-                                    included_channels.remove(ch_nr)
-                                except KeyError:
-                                    pass
-
-                        if dep.comparison_quantity_channel:
-                            gp_nr, ch_nr = dep.comparison_quantity_channel
-                            if gp_nr == index:
-                                try:
-                                    included_channels.remove(ch_nr)
-                                except KeyError:
-                                    pass
-
-        return included_channels
-
     def __contains__(self, channel):
         """ if *'channel name'* in *'mdf file'* """
         return channel in self.channels_db
@@ -498,7 +371,7 @@ class MDF(object):
         ----------
         version : str
             new mdf file version from ('2.00', '2.10', '2.14', '3.00', '3.10',
-            '3.20', '3.30', '4.00', '4.10', '4.11'); default '4.10'
+            '3.20', '3.30', '4.00', '4.10', '4.11', '4.20'); default '4.10'
 
         Returns
         -------
@@ -541,6 +414,7 @@ class MDF(object):
                     source_info = f"Converted from {self.version} to {version}"
                     if sigs:
                         cg_nr = out.append(sigs, source_info, common_timebase=True)
+                        out.groups[cg_nr].channel_group.comment = self.groups[virtual_group].channel_group.comment
                     else:
                         break
 
@@ -589,7 +463,7 @@ class MDF(object):
             * 1 : relative to first timestamp
         version : str
             new mdf file version from ('2.00', '2.10', '2.14', '3.00', '3.10',
-            '3.20', '3.30', '4.00', '4.10', '4.11'); default *None* and in this
+            '3.20', '3.30', '4.00', '4.10', '4.11', 4.20'); default *None* and in this
             case the original file version is used
         include_ends : bool
             include the *start* and *stop* timestamps after cutting the signal.
@@ -617,8 +491,8 @@ class MDF(object):
 
         if whence == 1:
             timestamps = []
-            for i, group in enumerate(self.groups):
-                master = self.get_master(i, record_offset=0, record_count=1,)
+            for group in self.virtual_groups:
+                master = self.get_master(group, record_offset=0, record_count=1)
                 if master.size:
                     timestamps.append(master[0])
 
@@ -640,40 +514,27 @@ class MDF(object):
             delta = 0
             out.header.start_time = self.header.start_time
 
-        groups_nr = len(self.groups)
+        groups_nr = len(self.virtual_groups)
 
         if self._callback:
             self._callback(0, groups_nr)
 
-        cg_nr = -1
-
         interpolation_mode = self._integer_interpolation
 
         # walk through all groups and get all channels
-        for i, group in enumerate(self.groups):
-            included_channels = self._included_channels(i)
-            if included_channels:
-                cg_nr += 1
-            else:
+        for i, (group_index, virtual_group) in enumerate(self.virtual_groups.items()):
+
+            included_channels = self.included_channels(group_index)[group_index]
+            if not included_channels:
                 continue
 
-            data = self._load_data(group, optimize_read=False)
-            parents, dtypes = self._prepare_record(group)
-
             idx = 0
-            for fragment in data:
-                if dtypes.itemsize:
-                    group.record = np.core.records.fromstring(fragment[0], dtype=dtypes)
+            for j, sigs in enumerate(self.get_(group_index, groups=included_channels)):
+                if j == 0:
+                    master = sigs[0].timestamps
+                    signals = sigs
                 else:
-                    group.record = None
-                #                master = self.get_master(i, data=fragment, one_piece=True)
-                self._set_temporary_master(None)
-                master = self.get_master(i, data=fragment)
-
-                self._set_temporary_master(master)
-                if not len(master):
-                    self._set_temporary_master(None)
-                    continue
+                    master = sigs[0][0]
 
                 needs_cutting = True
 
@@ -726,8 +587,15 @@ class MDF(object):
                         if start_index == 0 and stop_index == len(master):
                             needs_cutting = False
 
+                # update the signal is this is not the first yield
+                if j:
+                    for signal, (samples, invalidation) in zip (signals, sigs[1:]):
+                        signal.samples = samples
+                        signal.timestamps = master
+                        signal.invalidation_bits = invalidation
+
                 if needs_cutting:
-                    cut_timebase = (
+                    master = (
                         Signal(master, master, name="_")
                         .cut(
                             fragment_start,
@@ -738,148 +606,54 @@ class MDF(object):
                         .timestamps
                     )
 
-                # the first fragment triggers and append that will add the
-                # metadata for all channels
+                    signals = [
+                        sig.interp(
+                            master,
+                            interpolation_mode=interpolation_mode,
+                        )
+                        for sig in signals
+                    ]
+
+                if time_from_zero:
+                    master = master - delta
+                    for sig in signals:
+                        sig.timestamps = master
+
                 if idx == 0:
-                    sigs = []
-                    for j in included_channels:
-                        sig = self.get(
-                            group=i,
-                            index=j,
-                            data=fragment,
-                            raw=True,
-                            ignore_invalidation_bits=True,
-                        )
-                        if needs_cutting:
-                            sig = sig.interp(
-                                cut_timebase, interpolation_mode=interpolation_mode
-                            )
 
-                        # if sig.stream_sync and False:
-                        #     attachment, _name = sig.attachment
-                        #     duration = get_video_stream_duration(attachment)
-                        #     if start is None:
-                        #         start_t = 0
-                        #     else:
-                        #         start_t = start
-                        #
-                        #     if stop is None:
-                        #         end_t = duration
-                        #     else:
-                        #         end_t = stop
-                        #
-                        #     attachment = cut_video_stream(
-                        #         attachment,
-                        #         start_t,
-                        #         end_t,
-                        #         Path(_name).suffix,
-                        #     )
-                        #     sig.attachment = attachment, _name
-
-                        if not sig.samples.flags.owndata:
-                            sig.samples = sig.samples.copy()
-                        sigs.append(sig)
-
-                    if sigs:
-                        if time_from_zero:
-                            new_timestamps = cut_timebase - delta
-                            for sig in sigs:
-                                sig.timestamps = new_timestamps
-                        if start:
-                            start_ = f"{start}s"
-                        else:
-                            start_ = "start of measurement"
-                        if stop:
-                            stop_ = f"{stop}s"
-                        else:
-                            stop_ = "end of measurement"
-                        out.append(
-                            sigs, f"Cut from {start_} to {stop_}", common_timebase=True
-                        )
-                        try:
-                            if group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT:
-                                out.groups[
-                                    -1
-                                ].channel_group.flags = group.channel_group.flags
-                                out.groups[
-                                    -1
-                                ].channel_group.acq_name = group.channel_group.acq_name
-                                out.groups[
-                                    -1
-                                ].channel_group.acq_source = (
-                                    group.channel_group.acq_source
-                                )
-                                out.groups[
-                                    -1
-                                ].channel_group.comment = group.channel_group.comment
-                        except AttributeError:
-                            pass
+                    if start:
+                        start_ = f"{start}s"
                     else:
-                        break
+                        start_ = "start of measurement"
+                    if stop:
+                        stop_ = f"{stop}s"
+                    else:
+                        stop_ = "end of measurement"
+                    cg_nr = out.append(
+                        signals,
+                        f"Cut from {start_} to {stop_}",
+                        common_timebase=True,
+                    )
+                    out.groups[cg_nr].channel_group.comment = self.groups[group_index].channel_group.comment
 
-                    idx += 1
-
-                # the other fragments will trigger onl the extension of
-                # samples records to the data block
                 else:
-                    if needs_cutting:
-                        timestamps = cut_timebase
-                    else:
-                        timestamps = master
+                    sigs = [
+                        (sig.samples, sig.invalidation_bits)
+                        for sig in signals
+                    ]
+                    sigs.insert(0, (master, None))
+                    out.extend(cg_nr, sigs)
 
-                    if time_from_zero:
-                        timestamps = timestamps - delta
-
-                    sigs = [(timestamps, None)]
-
-                    for j in included_channels:
-                        sig = self.get(
-                            group=i,
-                            index=j,
-                            data=fragment,
-                            raw=True,
-                            samples_only=True,
-                            ignore_invalidation_bits=True,
-                        )
-                        if needs_cutting:
-                            _sig = Signal(
-                                sig[0], master, name="_", invalidation_bits=sig[1]
-                            ).interp(
-                                cut_timebase, interpolation_mode=interpolation_mode
-                            )
-                            sig = (_sig.samples, _sig.invalidation_bits)
-
-                            del _sig
-                        sigs.append(sig)
-
-                    if sigs:
-                        out.extend(cg_nr, sigs)
-
-                    idx += 1
-
-                group.record = None
-                self._set_temporary_master(None)
+                idx += 1
 
             # if the cut interval is not found in the measurement
-            # then append an empty data group
+            # then append a data group with 0 cycles
             if idx == 0:
-
-                self.configure(read_fragment_size=1)
-                sigs = []
-
-                fragment = next(self._load_data(group, optimize_read=False))
-
-                for j in included_channels:
-                    sig = self.get(
-                        group=i,
-                        index=j,
-                        data=fragment,
-                        raw=True,
-                        ignore_invalidation_bits=True,
-                    )
+                for sig in signals:
                     sig.samples = sig.samples[:0]
                     sig.timestamps = sig.timestamps[:0]
-                    sigs.append(sig)
+                    if sig.invalidation_bits is not None:
+                        sig.invaldiation_bits = sig.invalidation_bits[:0]
 
                 if start:
                     start_ = f"{start}s"
@@ -889,9 +663,11 @@ class MDF(object):
                     stop_ = f"{stop}s"
                 else:
                     stop_ = "end of measurement"
-                out.append(sigs, f"Cut from {start_} to {stop_}", common_timebase=True)
-
-                self.configure(read_fragment_size=0)
+                out.append(
+                    signals,
+                    f"Cut from {start_} to {stop_}",
+                    common_timebase=True,
+                )
 
             if self._callback:
                 self._callback(i + 1, groups_nr)
@@ -1085,10 +861,7 @@ class MDF(object):
                 if self._terminate:
                     return
 
-                included_channels = self._included_channels(i)
-
-                for j in included_channels:
-                    ch = grp.channels[j]
+                for ch in grp.channels:
 
                     if use_display_names:
                         channel_name = ch.display_name or ch.name
@@ -1172,26 +945,41 @@ class MDF(object):
                     # each HDF5 group will have a string attribute "master"
                     # that will hold the name of the master channel
 
-                    groups_nr = len(self.groups)
-                    for i, grp in enumerate(self.groups):
-                        if not len(grp.channels):
+                    groups_nr = len(self.virtual_groups)
+                    for i, (group_index, virtual_group) in enumerate(self.virtual_groups.items()):
+                        channels = self.included_channels(group_index)[group_index]
+
+                        if not channels:
                             continue
+
                         names = UniqueDB()
                         if self._terminate:
                             return
+
+                        if len(virtual_group.groups) == 1:
+                            comment = self.groups[
+                                virtual_group.groups[0]
+                            ].channel_group.comment
+                        else:
+                            comment = 'Virtual group i'
+
                         group_name = r"/" + f"ChannelGroup_{i}"
                         group = hdf.create_group(group_name)
 
-                        group.attrs["comment"] = grp.channel_group.comment
+                        group.attrs["comment"] = comment
 
-                        master_index = self.masters_db.get(i, -1)
+                        master_index = self.masters_db.get(group_index, -1)
 
                         if master_index >= 0:
-                            group.attrs["master"] = grp.channels[master_index].name
+                            group.attrs["master"] = self.groups[group_index].channels[master_index].name
 
-                        channels = self.select(
-                            [(ch.name, i, None) for ch in grp.channels]
-                        )
+                        channels = [
+                            (None, gp_index, ch_index)
+                            for gp_index, channel_indexes in channels.items()
+                            for ch_index in channel_indexes
+                        ]
+
+                        channels = self.select(channels)
 
                         for j, sig in enumerate(channels):
                             if use_display_names:
@@ -1281,17 +1069,22 @@ class MDF(object):
 
                 filename = filename.with_suffix(".csv")
 
-                gp_count = len(self.groups)
-                for i, grp in enumerate(self.groups):
+                gp_count = len(self.virtual_groups)
+                for i, (group_index, virtual_group) in enumerate(self.virtual_groups.items()):
 
                     if self._terminate:
                         return
-                    if not len(grp.channels):
-                        continue
+
                     message = f"Exporting group {i+1} of {gp_count}"
                     logger.info(message)
 
-                    comment = grp.channel_group.comment
+                    if len(virtual_group.groups) == 1:
+                        comment = self.groups[
+                            virtual_group.groups[0]
+                        ].channel_group.comment
+                    else:
+                        comment = ""
+
                     if comment:
                         for char in r" \/:":
                             comment = comment.replace(char, "_")
@@ -1305,7 +1098,7 @@ class MDF(object):
                         )
 
                     df = self.get_group(
-                        i,
+                        group_index,
                         raster=raster,
                         time_from_zero=time_from_zero,
                         use_display_names=use_display_names,
@@ -1372,31 +1165,38 @@ class MDF(object):
                 channel_name_template = "DG{}_{}"
                 used_names = UniqueDB()
 
-                groups_nr = len(self.groups)
+                groups_nr = len(self.virtual_groups)
 
-                for i, grp in enumerate(self.groups):
+                for i, (group_index, virtual_group) in enumerate(self.virtual_groups.items()):
                     if self._terminate:
                         return
-                    if not len(grp.channels):
+
+                    channels = self.included_channels(group_index)[group_index]
+
+                    if not channels:
                         continue
 
-                    included_channels = self._included_channels(i)
-
-                    master_index = self.masters_db.get(i, -1)
-
-                    if master_index >= 0:
-                        included_channels.add(master_index)
+                    channels = [
+                        (None, gp_index, ch_index)
+                        for gp_index, channel_indexes in channels.items()
+                        for ch_index in channel_indexes
+                    ]
 
                     channels = self.select(
-                        [(None, i, idx) for idx in included_channels],
+                        channels,
                         ignore_value2text_conversions=ignore_value2text_conversions,
                     )
 
-                    for j, sig in zip(included_channels, channels):
+                    master = channels[0].copy()
+                    master.samples = master.timestamps
 
-                        if j == master_index:
-                            channel_name = master_name_template.format(i, sig.name)
+                    channels.insert(0, master)
+
+                    for j, sig in enumerate(channels):
+                        if j == 0:
+                            channel_name = master_name_template.format(i, "timestamps")
                         else:
+
                             if use_display_names:
                                 channel_name = sig.display_name or sig.name
                             else:
@@ -1492,7 +1292,7 @@ class MDF(object):
 
         version : str
             new mdf file version from ('2.00', '2.10', '2.14', '3.00', '3.10',
-            '3.20', '3.30', '4.00', '4.10', '4.11'); default *None* and in this
+            '3.20', '3.30', '4.00', '4.10', '4.11', '4.20'); default *None* and in this
             case the original file version is used
 
         Returns
@@ -1568,12 +1368,9 @@ class MDF(object):
         if self._callback:
             self._callback(0, groups_nr)
 
-        # append filtered channels to new MDF
         for i, (group_index, groups) in enumerate(gps.items()):
 
             for idx, sigs in enumerate(self.get_(group_index, groups=groups, version=version)):
-                # the first fragment triggers and append that will add the
-                # metadata for all channels
                 if not sigs:
                     break
 
@@ -1582,6 +1379,7 @@ class MDF(object):
                     source_info = f"Signals filtered from <{origin}>"
                     if sigs:
                         cg_nr = mdf.append(sigs, source_info, common_timebase=True)
+                        mdf.groups[cg_nr].channel_group.comment = self.groups[group_index].channel_group.comment
                     else:
                         break
 
@@ -1763,8 +1561,8 @@ class MDF(object):
 
         merged.header.start_time = oldest
 
-        encodings = []
         included_channel_names = []
+        cg_map = {}
 
         if add_samples_origin:
             origin_conversion = {}
@@ -1782,181 +1580,79 @@ class MDF(object):
 
             mdf.configure(copy_on_get=False)
 
-            try:
-                for can_id, info in mdf.can_logging_db.items():
-                    if can_id not in merged.can_logging_db:
-                        merged.can_logging_db[can_id] = {}
-                    merged.can_logging_db[can_id].update(info)
-            except AttributeError:
-                pass
-
             if mdf_index == 0:
-                last_timestamps = [None for gp in mdf.groups]
-                groups_nr = len(mdf.groups)
+                last_timestamps = [None for gp in mdf.virtual_groups]
+                groups_nr = len(last_timestamps)
 
-            cg_nr = -1
-
-            for i, group in enumerate(mdf.groups):
-                included_channels = mdf._included_channels(i)
+            for i, group_index in enumerate(mdf.virtual_groups):
+                included_channels = mdf.included_channels(group_index)[group_index]
 
                 if mdf_index == 0:
                     included_channel_names.append(
-                        [group.channels[k].name for k in included_channels]
+                        [
+                            mdf.groups[gp_index].channels[ch_index].name
+                            for gp_index, channels in included_channels.items()
+                            for ch_index in channels
+                        ]
                     )
                 else:
-                    names = [group.channels[k].name for k in included_channels]
+                    names = [
+                        mdf.groups[gp_index].channels[ch_index].name
+                        for gp_index, channels in included_channels.items()
+                        for ch_index in channels
+                    ]
                     if names != included_channel_names[i]:
                         if sorted(names) != sorted(included_channel_names[i]):
                             raise MdfException(
-                                f"internal structure of file {mdf_index} is different"
+                                f"internal structure of file {mdf_index} is different; different channels order"
                             )
                         else:
-                            logger.warning(
-                                f"Different channel order in channel group {i} of file {mdf_index}."
-                                " Data can be corrupted if the there are channels with the same "
-                                "name in this channel group"
+                            raise MdfException(
+                                f"internal structure of file {mdf_index} is different; different channels"
                             )
-                            included_channels = [
-                                mdf._validate_channel_selection(name=name_, group=i,)[1]
-                                for name_ in included_channel_names[i]
-                            ]
-
-                if included_channels:
-                    cg_nr += 1
-                else:
+                if not included_channels:
                     continue
-                channels_nr = len(group.channels)
-
-                y_axis = MERGE
-
-                idx = np.searchsorted(CHANNEL_COUNT, channels_nr, side="right") - 1
-                if idx < 0:
-                    idx = 0
-                read_size = y_axis[idx]
 
                 idx = 0
                 last_timestamp = last_timestamps[i]
                 first_timestamp = None
                 original_first_timestamp = None
 
-                if read_size:
-                    mdf.configure(read_fragment_size=int(read_size))
-
-                parents, dtypes = mdf._prepare_record(group)
-
-                data = mdf._load_data(group, optimize_read=False)
-
-                for f_index, fragment in enumerate(data):
-
-                    if dtypes.itemsize:
-                        group.record = np.core.records.fromstring(
-                            fragment[0], dtype=dtypes
-                        )
-                    else:
-                        group.record = None
-
-                    mdf._set_temporary_master(mdf.get_master(i, data=fragment))
-
+                for idx, signals in enumerate(mdf.get_(group_index, groups=included_channels)):
                     if mdf_index == 0 and idx == 0:
-                        encodings_ = []
-                        encodings.append(encodings_)
-                        signals = []
-                        for j in included_channels:
-                            sig = mdf.get(
-                                group=i,
-                                index=j,
-                                data=fragment,
-                                raw=True,
-                                ignore_invalidation_bits=True,
-                            )
 
-                            if version < "4.00":
-                                if sig.samples.dtype.kind == "S":
-                                    encodings_.append(sig.encoding)
-                                    strsig = mdf.get(
-                                        group=i,
-                                        index=j,
-                                        samples_only=True,
-                                        ignore_invalidation_bits=True,
-                                    )[0]
-                                    sig.samples = sig.samples.astype(strsig.dtype)
-                                    del strsig
-                                    if sig.encoding != "latin-1":
-
-                                        if sig.encoding == "utf-16-le":
-                                            sig.samples = (
-                                                sig.samples.view(np.uint16)
-                                                .byteswap()
-                                                .view(sig.samples.dtype)
-                                            )
-                                            sig.samples = encode(
-                                                decode(sig.samples, "utf-16-be"),
-                                                "latin-1",
-                                            )
-                                        else:
-                                            sig.samples = encode(
-                                                decode(sig.samples, sig.encoding),
-                                                "latin-1",
-                                            )
-                                else:
-                                    encodings_.append(None)
-
-                            if not sig.samples.flags.owndata:
-                                sig.samples = sig.samples.copy()
-                            signals.append(sig)
-
-                        if signals and len(signals[0]):
+                        first_signal = signals[0]
+                        if len(first_signal):
                             if offset > 0:
-                                timestamps = signals[0].timestamps + offset
+                                timestamps = first_signal.timestamps + offset
                                 for sig in signals:
                                     sig.timestamps = timestamps
-                            last_timestamp = signals[0].timestamps[-1]
-                            first_timestamp = signals[0].timestamps[0]
+                            last_timestamp = first_signal.timestamps[-1]
+                            first_timestamp = first_signal.timestamps[0]
                             original_first_timestamp = first_timestamp
 
                         if add_samples_origin:
-                            if signals:
-                                _s = signals[-1]
-                                signals.append(
-                                    Signal(
-                                        samples=np.ones(len(_s), dtype="<u2")
-                                        * mdf_index,
-                                        timestamps=_s.timestamps,
-                                        conversion=origin_conversion,
-                                        name="__samples_origin",
-                                    )
+                            signals.append(
+                                Signal(
+                                    samples=np.ones(len(first_signal), dtype="<u2") * mdf_index,
+                                    timestamps=first_signal.timestamps,
+                                    conversion=origin_conversion,
+                                    name="__samples_origin",
                                 )
-                                _s = None
+                            )
 
-                        if signals:
-                            merged.append(signals, common_timebase=True)
-                            try:
-                                if group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT:
-                                    merged.groups[
-                                        -1
-                                    ].channel_group.flags = group.channel_group.flags
-                                    merged.groups[
-                                        -1
-                                    ].channel_group.acq_name = (
-                                        group.channel_group.acq_name
-                                    )
-                                    merged.groups[
-                                        -1
-                                    ].channel_group.acq_source = (
-                                        group.channel_group.acq_source
-                                    )
-                                    merged.groups[
-                                        -1
-                                    ].channel_group.comment = (
-                                        group.channel_group.comment
-                                    )
-                            except AttributeError:
-                                pass
-                        else:
-                            break
-                        idx += 1
+                        cg_nr = merged.append(signals, common_timebase=True)
+                        merged.groups[cg_nr].channel_group.comment = mdf.groups[group_index].channel_group.comment
+                        cg_map[group_index] = cg_nr
+
                     else:
-                        master = mdf.get_master(i, fragment)
+                        if idx == 0:
+                            signals = [(signals[0].timestamps, None)] + [
+                                (sig.samples, sig.invalidation_bits)
+                                for sig in signals
+                            ]
+
+                        master = signals[0][0]
                         _copied = False
 
                         if len(master):
@@ -1981,60 +1677,20 @@ class MDF(object):
                                     master += last_timestamp + delta
                                 last_timestamp = master[-1]
 
-                            signals = [(master, None)]
+                            signals[0] = master, None
 
-                            for k, j in enumerate(included_channels):
-                                sig = mdf.get(
-                                    group=i,
-                                    index=j,
-                                    data=fragment,
-                                    raw=True,
-                                    samples_only=True,
-                                    ignore_invalidation_bits=True,
-                                )
-
-                                signals.append(sig)
-
-                                if version < "4.00":
-                                    encoding = encodings[i][k]
-                                    samples = sig[0]
-                                    if encoding:
-                                        if encoding != "latin-1":
-
-                                            if encoding == "utf-16-le":
-                                                samples = (
-                                                    samples.view(np.uint16)
-                                                    .byteswap()
-                                                    .view(samples.dtype)
-                                                )
-                                                samples = encode(
-                                                    decode(samples, "utf-16-be"),
-                                                    "latin-1",
-                                                )
-                                            else:
-                                                samples = encode(
-                                                    decode(samples, encoding), "latin-1"
-                                                )
-                                            sig.samples = samples
-
-                            if signals:
-                                if add_samples_origin:
-                                    _s = signals[-1][0]
-                                    signals.append(
-                                        (
-                                            np.ones(len(_s), dtype="<u2") * mdf_index,
-                                            None,
-                                        )
+                            if add_samples_origin:
+                                signals.append(
+                                    (
+                                        np.ones(len(master), dtype="<u2") * mdf_index,
+                                        None,
                                     )
-                                    _s = None
-                                merged.extend(cg_nr, signals)
+                                )
+                            cg_nr = cg_map[group_index]
+                            merged.extend(cg_nr, signals)
 
                             if first_timestamp is None:
                                 first_timestamp = master[0]
-                        idx += 1
-
-                    group.record = None
-                    mdf._set_temporary_master(None)
 
                 last_timestamps[i] = last_timestamp
 
@@ -2144,6 +1800,7 @@ class MDF(object):
                             for sig in signals:
                                 sig.timestamps = timestamps
                         dg_cntr = stacked.append(signals, common_timebase=True)
+                        stacked.groups[dg_cntr].channel_group.comment = mdf.groups[group].channel_group.comment
                     else:
                         master = signals[0][0]
                         if sync:
@@ -2228,8 +1885,8 @@ class MDF(object):
 
         version : str
             new mdf file version from ('2.00', '2.10', '2.14', '3.00', '3.10',
-            '3.20', '3.30', '4.00', '4.10', '4.11'); default *None* and in this
-            case the original file version is used
+            '3.20', '3.30', '4.00', '4.10', '4.11', '4.20'); default *None* and
+            in this case the original file version is used
 
         time_from_zero : bool
             start time stamps from 0s in the cut measurement
@@ -2406,16 +2063,19 @@ class MDF(object):
                 for ch_index in channel_indexes
             ]
             sigs = self.select(channels, raw=True)
+
             sigs = [
                 sig.interp(raster, interpolation_mode=interpolation_mode)
                 for sig in sigs
             ]
 
-            if new_raster is not None:
+            if new_raster is not None :
                 for sig in sigs:
-                    sig.timestamps = new_raster
+                    if len(sig):
+                        sig.timestamps = new_raster
 
-            mdf.append(sigs, common_timebase=True)
+            dg_cntr = mdf.append(sigs, common_timebase=True)
+            mdf.groups[dg_cntr].channel_group.comment = self.groups[group_index].channel_group.comment
 
             if self._callback:
                 self._callback(i + 1, groups_nr)
@@ -2571,8 +2231,8 @@ class MDF(object):
                         else:
 
                             signal.samples[current_pos:next_pos] = sig
-                            if signal.invalidation is not None:
-                                signal.invalidation[current_pos:next_pos] = inval
+                            if signal.invalidation_bits is not None:
+                                signal.invalidation_bits[current_pos:next_pos] = inval
 
                 current_pos = next_pos
 
@@ -2889,7 +2549,7 @@ class MDF(object):
 
             mdf.close()
 
-            dst = name.with_suffix(".scrambled.mf4")
+            dst = name.with_suffix(".scrambled.mdf")
 
             copy(name, dst)
 
@@ -2964,7 +2624,7 @@ class MDF(object):
             .. versionadded:: 5.8.0
 
         only_basenames (False) : bool
-            use jsut the field names, without prefix, for structures and channel
+            use just the field names, without prefix, for structures and channel
             arrays
 
             .. versionadded:: 5.13.0

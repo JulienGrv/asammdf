@@ -751,7 +751,7 @@ def merge_reader_v4_nodata(output, fmt):
 def filter_asam(output, fmt):
     with Timer("Filter file", f"asammdf {asammdf_version} mdfv4", fmt) as timer:
         x = MDF(r"test.mf4").filter(
-            [f"Channel_{i}_{j}5" for i in range(10) for j in range(1, 20)]
+            [(None, i, int(f'{j}5')) for i in range(10, 20) for j in range(1, 20)]
         )
         t = perf_counter()
         counter = 0
@@ -955,7 +955,7 @@ def main(text_output, fmt):
     output.append("    * {} groups".format(v4_groups))
     output.append("    * {} channels\n\n".format(v4_channels))
 
-    OPEN, SAVE, GET, CONVERT, MERGE, FILTER, CUT = 1, 1, 1, 1, 0, 0, 0
+    OPEN, SAVE, GET, CONVERT, MERGE, FILTER, CUT = 1, 1, 1, 1, 1, 0, 0
 
     tests = (
 #        open_mdf3,
@@ -964,9 +964,9 @@ def main(text_output, fmt):
 #        open_reader3_compression,
         open_mdf4,
         open_mdf4_column,
-#        open_reader4,
+        open_reader4,
         open_reader4_nodata,
-#        open_reader4_compression,
+        open_reader4_compression,
     )
 
     if tests and OPEN:
@@ -1010,7 +1010,7 @@ def main(text_output, fmt):
 #        get_all_reader3_compression,
         get_all_mdf4,
         get_all_mdf4_column,
-        get_all_reader4,
+#        get_all_reader4,
         get_all_reader4_nodata,
 #        get_all_reader4_compression,
 
@@ -1045,14 +1045,14 @@ def main(text_output, fmt):
         output.extend(table_end(fmt))
 
     tests = (
-        merge_v3,
-        merge_reader_v3,
-        merge_reader_v3_nodata,
-        merge_reader_v3_compress,
+#        merge_v3,
+#        merge_reader_v3,
+#        merge_reader_v3_nodata,
+#        merge_reader_v3_compress,
         merge_v4,
-        merge_reader_v4,
-        merge_reader_v4_nodata,
-        merge_reader_v4_compress,
+#        merge_reader_v4,
+#        merge_reader_v4_nodata,
+#        merge_reader_v4_compress,
     )
 
     if tests and MERGE:
@@ -1086,9 +1086,9 @@ def main(text_output, fmt):
 
     tests = (
         cut_asam,
-        cut_reader4,
-        cut_reader4_compression,
-        cut_reader4_nodata,
+#        cut_reader4,
+#        cut_reader4_compression,
+#        cut_reader4_nodata,
     )
 
     if tests and CUT:

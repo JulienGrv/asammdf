@@ -12,7 +12,7 @@ from hashlib import md5
 from itertools import chain
 from math import ceil
 from tempfile import TemporaryFile
-from zlib import decompress
+from zlib import decompress, compress
 from pathlib import Path
 import mmap
 from functools import lru_cache
@@ -614,7 +614,7 @@ class MDF4(object):
         # channel dependencies and load the signal data for VLSD channels
         for gp_index, grp in enumerate(self.groups):
 
-            if self.version >= "4.20" and grp.channel_group.cg_master_addr:
+            if self.version >= "4.20" and grp.channel_group.flags & v4c.FLAG_CG_REMOTE_MASTER:
                 grp.channel_group.cg_master_index = self._cg_map[
                     grp.channel_group.cg_master_addr
                 ]
@@ -2937,8 +2937,10 @@ class MDF4(object):
         gp.signal_types = gp_sig_types = []
         gp.logging_channels = []
 
+        cycles_nr = len(t)
+
         # channel group
-        kwargs = {"cycles_nr": 0, "samples_byte_nr": 0}
+        kwargs = {"cycles_nr": cycles_nr, "samples_byte_nr": 0}
         gp.channel_group = ChannelGroup(**kwargs)
         gp.channel_group.acq_name = source_info
 
@@ -2955,7 +2957,6 @@ class MDF4(object):
 
         self.groups.append(gp)
 
-        cycles_nr = len(t)
         fields = []
         types = []
         parents = {}
@@ -3633,7 +3634,7 @@ class MDF4(object):
             if self.version < "4.20":
                 data_address = self._tempfile.tell()
                 gp.data_location = v4c.LOCATION_TEMPORARY_FILE
-                samples.tofile(self._tempfile)
+                self._tempfile.write(samples.tobytes())
 
                 chunk = self._write_fragment_size // samples.itemsize
                 chunk *= samples.itemsize
@@ -3667,14 +3668,14 @@ class MDF4(object):
                 data_address = self._tempfile.tell()
                 gp.data_location = v4c.LOCATION_TEMPORARY_FILE
                 gp.uses_ld = True
-                samples.tofile(self._tempfile)
+                self._tempfile.write(samples.tobytes())
 
                 chunk = self._write_fragment_size // samples.itemsize
                 chunk *= samples.itemsize
 
                 if invalidation_bytes_nr:
                     invalidation_address = self._tempfile.tell()
-                    inval_bits.tofile(self._tempfile)
+                    self._tempfile.write(inval_bits.tobytes())
 
                 while size:
 
@@ -3738,6 +3739,7 @@ class MDF4(object):
         file = self._tempfile
         tell = file.tell
         seek = file.seek
+        write = file.write
 
         seek(0, 2)
 
@@ -3853,9 +3855,9 @@ class MDF4(object):
         dg_cntr += 1
 
         if size:
-            data_address = self._tempfile.tell()
+            data_address = tell()
             gp.data_location = v4c.LOCATION_TEMPORARY_FILE
-            samples.tofile(self._tempfile)
+            write(samples.tobytes())
 
             chunk = self._write_fragment_size // samples.itemsize
             chunk *= samples.itemsize
@@ -3931,7 +3933,6 @@ class MDF4(object):
                 if sig_dtype.kind in "SV":
                     sig_type = v4c.SIGNAL_TYPE_STRING
             else:
-                prepare_record = False
                 if names in (v4c.CANOPEN_TIME_FIELDS, v4c.CANOPEN_DATE_FIELDS):
                     sig_type = v4c.SIGNAL_TYPE_CANOPEN
                 elif names[0] != sig.name:
@@ -4465,16 +4466,16 @@ class MDF4(object):
             dg_cntr += 1
             size = cycles_nr * samples.itemsize
             if size:
-                data_address = self._tempfile.tell()
+                data_address = tell()
                 gp.data_location = v4c.LOCATION_TEMPORARY_FILE
-                samples.tofile(self._tempfile)
+                write(samples.tobytes())
 
                 chunk = self._write_fragment_size // samples.itemsize
                 chunk *= samples.itemsize
 
                 if invalidation_bits is not None:
-                    invalidation_address = self._tempfile.tell()
-                    invalidation_bits.tofile(self._tempfile)
+                    invalidation_address = tell()
+                    write(invalidation_bits.tobytes())
 
                 while size:
 
@@ -4535,8 +4536,6 @@ class MDF4(object):
 
         """
 
-        prepare_record = True
-
         units = units or {}
 
         t = df.index
@@ -4555,16 +4554,15 @@ class MDF4(object):
         gp.signal_types = gp_sig_types = []
         gp.logging_channels = []
 
+        cycles_nr = len(t)
+
         # channel group
-        kwargs = {"cycles_nr": 0, "samples_byte_nr": 0}
+        kwargs = {"cycles_nr": cycles_nr, "samples_byte_nr": 0}
         gp.channel_group = ChannelGroup(**kwargs)
         gp.channel_group.acq_name = source_info
 
-        invalidation_bytes_nr = 0
-
         self.groups.append(gp)
 
-        cycles_nr = len(t)
         fields = []
         types = []
         parents = {}
@@ -4783,6 +4781,8 @@ class MDF4(object):
 
             samples.tofile(self._tempfile)
 
+            self._tempfile.write(samples.tobytes())
+
             gp.data_blocks.append(
                 DataBlockInfo(
                     address=data_address,
@@ -4857,7 +4857,7 @@ class MDF4(object):
         if source_bus:
             kwargs["flags"] = v4c.FLAG_CN_BUS_EVENT
             flags_ = v4c.FLAG_CN_BUS_EVENT
-            grp.channel_group.flags = v4c.FLAG_CG_BUS_EVENT
+            grp.channel_group.flags |= v4c.FLAG_CG_BUS_EVENT
         else:
             kwargs["flags"] = 0
             flags_ = 0
@@ -5287,7 +5287,7 @@ class MDF4(object):
         if source_bus:
             kwargs["flags"] = v4c.FLAG_CN_BUS_EVENT
             flags_ = v4c.FLAG_CN_BUS_EVENT
-            grp.channel_group.flags = v4c.FLAG_CG_BUS_EVENT
+            grp.channel_group.flags |= v4c.FLAG_CG_BUS_EVENT
         else:
             kwargs["flags"] = 0
             flags_ = 0
@@ -5692,6 +5692,8 @@ class MDF4(object):
         types = []
         inval_bits = []
 
+        added_cycles = len(signals[0][0])
+
         invalidation_bytes_nr = gp.channel_group.invalidation_bytes_nr
         for i, ((signal, invalidation_bits), sig_type) in enumerate(
             zip(signals, gp.signal_types)
@@ -5827,25 +5829,24 @@ class MDF4(object):
         if size:
 
             if self.version < "4.20":
-
-                samples.tofile(stream)
-
+                data = samples.tobytes()
+                raw_size = len(data)
+                data = compress(samples.tobytes(), 1)
+                size = len(data)
+                stream.write(data)
                 gp.data_blocks.append(
                     DataBlockInfo(
                         address=addr,
-                        block_type=v4c.DT_BLOCK,
-                        raw_size=size,
+                        block_type=v4c.DZ_BLOCK_DEFLATE,
+                        raw_size=raw_size,
                         size=size,
                         param=0,
                     )
                 )
 
-                record_size = gp.channel_group.samples_byte_nr
-                record_size += gp.data_group.record_id_len
-                record_size += gp.channel_group.invalidation_bytes_nr
-                added_cycles = size // record_size
                 gp.channel_group.cycles_nr += added_cycles
                 self.virtual_groups[index].cycles_nr += added_cycles
+
             else:
                 samples.tofile(stream)
 
@@ -5859,9 +5860,8 @@ class MDF4(object):
                     )
                 )
 
-                record_size = gp.channel_group.samples_byte_nr
-                added_cycles = size // record_size
                 gp.channel_group.cycles_nr += added_cycles
+                self.virtual_groups[index].cycles_nr += added_cycles
 
                 if invalidation_bytes_nr:
                     addr = stream.tell()
@@ -5875,8 +5875,6 @@ class MDF4(object):
                             param=None,
                         )
                     )
-
-        del samples
 
     def _extend_column_oriented(self, index, signals):
         """
@@ -5920,10 +5918,16 @@ class MDF4(object):
             raise MdfException(message)
 
         stream = self._tempfile
+        stream.seek(0, 2)
+        write = stream.write
+        tell = stream.tell
+
+        added_cycles = len(signals[0][0])
+
+        self.virtual_groups[index].cycles_nr += added_cycles
 
         for i, (signal, invalidation_bits) in enumerate(signals):
             gp = self.groups[index + i]
-            invalidation_bytes_nr = gp.channel_group.invalidation_bytes_nr
             sig_type = gp.signal_types[0]
 
             # first add the signals in the simple signal list
@@ -5960,8 +5964,7 @@ class MDF4(object):
 
                 values = fromarrays(values, dtype=types_)
 
-                stream.seek(0, 2)
-                addr = stream.tell()
+                addr = tell()
                 block_size = len(values) * values.itemsize
                 if block_size:
                     info = SignalDataBlockInfo(
@@ -5971,42 +5974,48 @@ class MDF4(object):
                         offsets=offsets,
                     )
                     gp.signal_data[i].append(info)
-                    values.tofile(stream)
+                    write(values.tobytes())
 
                 offsets += cur_offset
 
                 samples = offsets
 
-            stream.seek(0, 2)
-            addr = stream.tell()
+            addr = tell()
             size = len(samples) * samples.itemsize
 
             if size:
-
-                samples.tofile(stream)
+                data = samples.tobytes()
+                raw_size = len(data)
+                data = compress(data, 1)
+                size = len(data)
+                write(data)
 
                 gp.data_blocks.append(
                     DataBlockInfo(
                         address=addr,
-                        block_type=v4c.DT_BLOCK,
-                        raw_size=size,
+                        block_type=v4c.DZ_BLOCK_DEFLATE,
+                        raw_size=raw_size,
                         size=size,
                         param=0,
                     )
                 )
 
-                added_cycles = len(samples)
                 gp.channel_group.cycles_nr += added_cycles
 
                 if invalidation_bits is not None:
-                    addr = stream.tell()
-                    invalidation_bits.tofile(stream)
+                    addr = tell()
+                    data = invalidation_bits.tobytes()
+                    raw_size = len(data)
+                    data = compress(data, 1)
+                    size = len(data)
+                    write(data)
+
                     gp.data_blocks[-1].invalidation_block(
                         InvalidationBlockInfo(
                             address=addr,
-                            block_type=v4c.DT_BLOCK,
-                            raw_size=invalidation_bytes_nr * added_cycles,
-                            size=invalidation_bytes_nr * added_cycles,
+                            block_type=v4c.DZ_BLOCK_DEFLATE,
+                            raw_size=raw_size,
+                            size=size,
                             param=None,
                         )
                     )
@@ -6392,6 +6401,7 @@ class MDF4(object):
                     record_count=record_count,
                     master_is_required=master_is_required,
                 )
+
         else:
             vals, timestamps, invalidation_bits, encoding = self._get_scalar(
                 channel=channel,
@@ -7707,8 +7717,8 @@ class MDF4(object):
                 group = self.groups[gp_index]
 
                 included_channels = set(range(len(group.channels)))
-                master_index = self.masters_db.get(index, None)
-                if master_index is not None and skip_master:
+                master_index = self.masters_db.get(gp_index, None)
+                if master_index is not None:
                     included_channels.remove(master_index)
 
                 channels = group.channels
@@ -7722,7 +7732,7 @@ class MDF4(object):
                     )
 
                     for dg_cntr, ch_cntr in where:
-                        if dg_cntr == index:
+                        if dg_cntr == gp_index:
                             break
                     else:
                         found = False
@@ -7759,9 +7769,11 @@ class MDF4(object):
                 for dependencies in group.channel_dependencies:
                     if dependencies is None:
                         continue
+
                     if all(
                         not isinstance(dep, ChannelArrayBlock) for dep in dependencies
                     ):
+
                         for _, ch_nr in dependencies:
                             try:
                                 included_channels.remove(ch_nr)
@@ -7775,7 +7787,7 @@ class MDF4(object):
                                 dep.input_quantity_channels,
                             ):
                                 for gp_nr, ch_nr in referenced_channels:
-                                    if gp_nr == index:
+                                    if gp_nr == gp_index:
                                         try:
                                             included_channels.remove(ch_nr)
                                         except KeyError:
@@ -7783,7 +7795,7 @@ class MDF4(object):
 
                             if dep.output_quantity_channel:
                                 gp_nr, ch_nr = dep.output_quantity_channel
-                                if gp_nr == index:
+                                if gp_nr == gp_index:
                                     try:
                                         included_channels.remove(ch_nr)
                                     except KeyError:
@@ -7791,14 +7803,13 @@ class MDF4(object):
 
                             if dep.comparison_quantity_channel:
                                 gp_nr, ch_nr = dep.comparison_quantity_channel
-                                if gp_nr == index:
+                                if gp_nr == gp_index:
                                     try:
                                         included_channels.remove(ch_nr)
                                     except KeyError:
                                         pass
 
-                if included_channels:
-                    gps[gp_index] = sorted(included_channels)
+                gps[gp_index] = sorted(included_channels)
 
             result = {index: gps}
         else:
@@ -7826,11 +7837,58 @@ class MDF4(object):
                         gps[group].add(idx)
 
             result = {}
-            for group, channels in gps.items():
-                master = self.virtual_groups_map[group]
+            for gp_index, channels in gps.items():
+                master = self.virtual_groups_map[gp_index]
+                group = self.groups[gp_index]
+                for dependencies in group.channel_dependencies:
+                    if dependencies is None:
+                        continue
+
+                    if all(
+                        not isinstance(dep, ChannelArrayBlock) for dep in dependencies
+                    ):
+
+                        for _, ch_nr in dependencies:
+                            try:
+                                channels.remove(ch_nr)
+                            except KeyError:
+                                pass
+                    else:
+                        for dep in dependencies:
+                            for referenced_channels in (
+                                dep.axis_channels,
+                                dep.dynamic_size_channels,
+                                dep.input_quantity_channels,
+                            ):
+                                for gp_nr, ch_nr in referenced_channels:
+                                    if gp_nr == gp_index:
+                                        try:
+                                            channels.remove(ch_nr)
+                                        except KeyError:
+                                            pass
+
+                            if dep.output_quantity_channel:
+                                gp_nr, ch_nr = dep.output_quantity_channel
+                                if gp_nr == gp_index:
+                                    try:
+                                        channels.remove(ch_nr)
+                                    except KeyError:
+                                        pass
+
+                            if dep.comparison_quantity_channel:
+                                gp_nr, ch_nr = dep.comparison_quantity_channel
+                                if gp_nr == gp_index:
+                                    try:
+                                        channels.remove(ch_nr)
+                                    except KeyError:
+                                        pass
+
                 if master not in result:
                     result[master] = {}
-                result[master][group] = sorted(channels)
+                master_index = self.masters_db.get(gp_index, None)
+                if master_index is not None and master_index in channels:
+                    channels.remove(master_index)
+                result[master][gp_index] = sorted(channels)
 
         return result
 
@@ -7847,7 +7905,7 @@ class MDF4(object):
         record_size = virtual_channel_group.record_size
 
         if groups is None:
-            groups = self.included_channels(index)[index]
+            groups = self.included_channels(index, skip_master=skip_master)[index]
 
         record_size = 0
         for group_index in groups:
@@ -7860,10 +7918,13 @@ class MDF4(object):
         if self._read_fragment_size:
             count = self._read_fragment_size // record_size or 1
         else:
-            count = 10 * 1024 * 1024 // record_size or 1
+            if version < "4.20":
+                count = 32 * 1024 * 1024 // record_size or 1
+            else:
+                count = 128 * 1024 * 1024 // record_size or 1
 
         data_streams = []
-        for group_index in groups:
+        for idx, group_index in enumerate(groups):
             grp = self.groups[group_index]
             grp.read_split_count = count
             data_streams.append(
@@ -7871,9 +7932,13 @@ class MDF4(object):
                     grp, record_offset=record_offset, record_count=record_count,
                 )
             )
+            if group_index == index:
+                master_index = idx
 
-        idx = 0
         encodings = {group_index: [None,] for groups_index in groups}
+
+        self._set_temporary_master(None)
+        idx = 0
 
         while True:
             try:
@@ -7881,7 +7946,13 @@ class MDF4(object):
             except:
                 break
 
-            self._set_temporary_master(self.get_master(index, data=fragments[0]))
+            _master = self.get_master(index, data=fragments[master_index])
+            self._set_temporary_master(_master)
+
+            if idx == 0:
+                signals = []
+            else:
+                signals = [(_master, None)]
 
             for fragment, (group_index, channels) in zip(fragments, groups.items()):
                 grp = self.groups[group_index]
@@ -7894,20 +7965,19 @@ class MDF4(object):
                         continue
 
                 if idx == 0:
-                    signals = [
-                        self.get(
-                            group=group_index,
-                            index=channel_index,
-                            data=fragment,
-                            raw=True,
-                            ignore_invalidation_bits=True,
-                            samples_only=False,
-                        )
-                        for channel_index in channels
-                    ]
-                else:
-                    signals = [(self._master, None)]
+                    for channel_index in channels:
+                        signals.append(
+                            self.get(
+                                group=group_index,
+                                index=channel_index,
+                                data=fragment,
+                                raw=True,
+                                ignore_invalidation_bits=True,
+                                samples_only=False,
+                            )
+                         )
 
+                else:
                     for channel_index in channels:
                         signals.append(
                             self.get(
@@ -7977,9 +8047,9 @@ class MDF4(object):
 
                 grp.record = None
 
-            yield signals
             self._set_temporary_master(None)
             idx += 1
+            yield signals
 
     def get_master(
         self,
