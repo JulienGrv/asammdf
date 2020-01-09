@@ -7840,7 +7840,8 @@ class MDF4(object):
             for gp_index, channels in gps.items():
                 master = self.virtual_groups_map[gp_index]
                 group = self.groups[gp_index]
-                for dependencies in group.channel_dependencies:
+                for ch_nr in channels:
+                    dependencies = group.channel_dependencies[ch_nr]
                     if dependencies is None:
                         continue
 
