@@ -3,6 +3,7 @@ from functools import partial
 import os
 from pathlib import Path
 import webbrowser
+import gc
 
 from PyQt5 import QtGui
 from PyQt5 import QtWidgets
@@ -11,12 +12,14 @@ import pyqtgraph as pg
 from natsort import natsorted
 
 from ...mdf import MDF, SUPPORTED_VERSIONS
+from ..dialogs.multi_search import MultiSearch
 from ..ui.main_window import Ui_PyMDFMainWindow
 from ...version import __version__ as libversion
 from ..utils import TERMINATED, run_thread_with_progress, setup_progress
 from .list import ListWidget
 from .file import FileWidget
 from .batch import BatchWidget
+from .plot import Plot
 
 
 class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
@@ -32,6 +35,8 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
 
         self.batch = BatchWidget(self.ignore_value2text_conversions)
         self.stackedWidget.addWidget(self.batch)
+        self.comparison_plot = Plot({}, parent=self)
+        self.stackedWidget.addWidget(self.comparison_plot)
         self.stackedWidget.setCurrentIndex(0)
 
         self.progress = None
@@ -65,6 +70,14 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
         icon.addPixmap(QtGui.QPixmap(":/list.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         action = QtWidgets.QAction(icon, "{: <20}".format("Batch processing"), menu)
         action.triggered.connect(partial(self.stackedWidget.setCurrentIndex, 1))
+        mode_actions.addAction(action)
+
+        icon = QtGui.QIcon()
+        icon.addPixmap(
+            QtGui.QPixmap(":/compare.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off
+        )
+        action = QtWidgets.QAction(icon, "{: <20}".format("Comparison"), menu)
+        action.triggered.connect(partial(self.stackedWidget.setCurrentIndex, 2))
         mode_actions.addAction(action)
 
         menu = QtWidgets.QMenu("Mode", self.menubar)
@@ -383,9 +396,12 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
 
     def plot_action(self, key, modifier=QtCore.Qt.NoModifier):
         event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, key, modifier)
-        widget = self.files.currentWidget()
-        if widget and widget.get_current_plot():
-            widget.get_current_plot().keyPressEvent(event)
+        if self.stackedWidget.currentIndex() == 0:
+            widget = self.files.currentWidget()
+            if widget and widget.get_current_plot():
+                widget.get_current_plot().keyPressEvent(event)
+        elif self.stackedWidget.currentIndex() == 2:
+            self.comparison_plot.keyPressEvent(event)
 
     def toggle_dots(self, key):
         self.with_dots = not self.with_dots
@@ -395,6 +411,8 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
 
         for i in range(count):
             self.files.widget(i).set_line_style(with_dots=self.with_dots)
+
+        self.comparison_plot.update_lines(with_dots=self.with_dots)
 
     def show_sub_windows(self, mode):
 
@@ -627,8 +645,9 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
                 self.batch.files_list.item(row).setIcon(icon)
 
     def open(self, event):
-        if self.stackedWidget.currentIndex() == 0:
+        if self.stackedWidget.currentIndex() in (0, 2):
             self.open_file(event)
+            self.stackedWidget.setCurrentIndex(0)
         else:
             self.open_batch_files(event)
 
@@ -662,10 +681,14 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
             "All files (*.dat *.mdf *.mf4 *.dl3 *.erg)",
         )
 
+        if file_names:
+            gc.collect()
+
         for file_name in natsorted(file_names):
             self._open_file(file_name)
 
     def open_folder(self, event):
+
         folder = QtWidgets.QFileDialog.getExistingDirectory(
             self,
             "Select folder",
@@ -675,6 +698,9 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
         )
         if not folder:
             return
+
+        gc.collect()
+
         if self.stackedWidget.currentIndex() == 0:
             for root, dirs, files in os.walk(folder):
                 for file in natsorted(files):
@@ -743,10 +769,15 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
             self.setWindowTitle(
                 f"asammdf {libversion} [PID={os.getpid()}] - Single files"
             )
-        else:
+        elif index == 1:
             self.plot_menu.setEnabled(False)
             self.setWindowTitle(
                 f"asammdf {libversion} [PID={os.getpid()}] - Batch processing"
+            )
+        elif index == 2:
+            self.plot_menu.setEnabled(True)
+            self.setWindowTitle(
+                f"asammdf {libversion} [PID={os.getpid()}] - Comparison"
             )
 
     def keyPressEvent(self, event):
@@ -756,5 +787,41 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
         if key == QtCore.Qt.Key_F and modifier == QtCore.Qt.ControlModifier:
             if self.files.count() and self.stackedWidget.currentIndex() == 0:
                 self.files.currentWidget().keyPressEvent(event)
+            elif self.files.count() and self.stackedWidget.currentIndex() == 2:
+                count = self.files.count()
+                channels_dbs = [
+                    self.files.widget(i).mdf.channels_db for i in range(count)
+                ]
+                tooltips = [
+                    f'Search results for file\n "{self.files.widget(i).file_name}"'
+                    for i in range(count)
+                ]
+                dlg = MultiSearch(channels_dbs, tooltips, parent=self,)
+                dlg.setModal(True)
+                dlg.exec_()
+                result = dlg.result
+                if result:
+                    selections = {}
+                    for file_index, (group_index, channel_index) in result:
+                        if file_index not in selections:
+                            selections[file_index] = []
+                        selections[file_index].append(
+                            (None, group_index, channel_index)
+                        )
+                    new_signals = []
+                    for file_index in sorted(selections):
+                        channels = selections[file_index]
+                        signals = self.files.widget(file_index).mdf.select(
+                            channels, copy_master=False,
+                        )
+                        for sig, entry in zip(signals, channels):
+                            sig.tooltip = f"{sig.name}\n@ {self.files.widget(file_index).file_name}"
+                            sig.name = f"{file_index+1}: {sig.name}"
+                            sig.group_index = entry[1]
+                            sig.channel_index = entry[2]
+                        new_signals.extend(signals)
+
+                    self.comparison_plot.add_new_channels(new_signals)
+
         else:
             super().keyPressEvent(event)

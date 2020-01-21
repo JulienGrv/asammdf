@@ -28,6 +28,7 @@ from numpy import (
     packbits,
     roll,
     uint8,
+    uint16,
     union1d,
     unique,
     unpackbits,
@@ -36,6 +37,7 @@ from numpy import (
 )
 
 from numpy.core.records import fromarrays, fromstring
+from numpy.core.defchararray import encode, decode
 from pandas import DataFrame
 
 from ..signal import Signal
@@ -56,6 +58,7 @@ from .utils import (
     is_file_like,
     Group,
     DataBlockInfo,
+    VirtualChannelGroup,
 )
 from .v2_v3_blocks import (
     Channel,
@@ -179,6 +182,9 @@ class MDF3(object):
         self.last_call_info = None
         self._master = None
 
+        self.virtual_groups_map = {}
+        self.virtual_groups = {}
+
         if name:
             if is_file_like(name):
                 self._file = name
@@ -211,6 +217,17 @@ class MDF3(object):
             self.name = Path("new.mdf")
 
         self._sort()
+
+        for index, grp in enumerate(self.groups):
+
+            self.virtual_groups_map[index] = index
+            if index not in self.virtual_groups:
+                self.virtual_groups[index] = VirtualChannelGroup()
+
+            virtual_channel_group = self.virtual_groups[index]
+            virtual_channel_group.groups.append(index)
+            virtual_channel_group.record_size =  grp.channel_group.samples_byte_nr
+            virtual_channel_group.cycles_nr = grp.channel_group.cycles_nr
 
     def __del__(self):
         self.close()
@@ -884,6 +901,7 @@ class MDF3(object):
         use_display_names=None,
         single_bit_uint_as_bool=None,
         integer_interpolation=None,
+        copy_on_get=None,
     ):
         """ configure MDF parameters
 
@@ -907,6 +925,8 @@ class MDF3(object):
 
                 * 0 - repeat previous sample
                 * 1 - use linear interpolation
+        copy_on_get : bool
+            copy arrays in the get method
 
         """
 
@@ -924,6 +944,9 @@ class MDF3(object):
 
         if integer_interpolation in (0, 1):
             self._integer_interpolation = int(integer_interpolation)
+
+        if copy_on_get is not None:
+            self.copy_on_get = copy_on_get
 
     def add_trigger(self, group, timestamp, pre_time=0, post_time=0, comment=""):
         """ add trigger to data group
@@ -1077,7 +1100,7 @@ class MDF3(object):
 
                 if different:
                     times = [s.timestamps for s in signals]
-                    timestampst = unique(concatenate(times)).astype(float64)
+                    timestamps = unique(concatenate(times)).astype(float64)
                     signals = [
                         s.interp(timestamps, interpolation_mode=interp_mode)
                         for s in signals
@@ -1285,6 +1308,7 @@ class MDF3(object):
                 channel.comment = signal.comment
                 channel.source = new_source
                 channel.conversion = conversion
+                channel.display_name = display_name
                 gp_channels.append(channel)
 
                 offset += s_size
@@ -1904,8 +1928,19 @@ class MDF3(object):
         else:
             gp.data_location = v23c.LOCATION_TEMPORARY_FILE
 
+        self.virtual_groups_map[dg_cntr] = dg_cntr
+        if dg_cntr not in self.virtual_groups:
+            self.virtual_groups[dg_cntr] = VirtualChannelGroup()
+
+        virtual_channel_group = self.virtual_groups[dg_cntr]
+        virtual_channel_group.groups.append(dg_cntr)
+        virtual_channel_group.record_size =  gp.channel_group.samples_byte_nr
+        virtual_channel_group.cycles_nr = gp.channel_group.cycles_nr
+
         # data group trigger
         gp.trigger = None
+
+        return dg_cntr
 
     def _append_dataframe(self, df, source_info="", units=None):
         """
@@ -2141,6 +2176,16 @@ class MDF3(object):
             )
         else:
             gp.data_location = v23c.LOCATION_TEMPORARY_FILE
+
+        self.virtual_groups_map[dg_cntr] = dg_cntr
+        if dg_cntr not in self.virtual_groups:
+            self.virtual_groups[dg_cntr] = VirtualChannelGroup()
+
+        virtual_channel_group = self.virtual_groups[dg_cntr]
+        virtual_channel_group.groups.append(dg_cntr)
+        virtual_channel_group.record_size =  gp.channel_group.samples_byte_nr
+        virtual_channel_group.cycles_nr = gp.channel_group.cycles_nr
+
         # data group trigger
         gp.trigger = None
 
@@ -2228,7 +2273,7 @@ class MDF3(object):
         cycles_nr = len(signals[0][0])
         string_counter = 0
 
-        for signal, _ in signals:
+        for k_i,( signal, _ )in enumerate(signals):
             sig = signal
             names = sig.dtype.names
 
@@ -2250,6 +2295,7 @@ class MDF3(object):
                     str_dtype = gp.string_dtypes[string_counter]
                     signal = signal.astype(str_dtype)
                     string_counter += 1
+
                 fields.append(signal)
 
                 if signal.shape[1:]:
@@ -2350,6 +2396,9 @@ class MDF3(object):
                     param=0,
                 )
             )
+
+        virtual_channel_group = self.virtual_groups[index]
+        virtual_channel_group.cycles_nr += cycles_nr
 
     def get_channel_name(self, group, index):
         """Gets channel name.
@@ -2888,19 +2937,13 @@ class MDF3(object):
 
                     timestamps = t
 
-            if conversion is None:
-                conversion_type = v23c.CONVERSION_TYPE_NONE
-            else:
-                conversion_type = conversion.conversion_type
-
-            if conversion_type == v23c.CONVERSION_TYPE_NONE:
-                if vals.dtype.kind == "S":
-                    encoding = "latin-1"
-
             if not raw:
                 if conversion:
                     vals = conversion.convert(vals)
                     conversion = None
+
+        if vals.dtype.kind == "S":
+            encoding = "latin-1"
 
         if samples_only:
             res = vals, None
@@ -3505,6 +3548,207 @@ class MDF3(object):
                 group.data_location = v23c.LOCATION_TEMPORARY_FILE
                 group.set_blocks_info(partial_records[rec_id])
                 group.sorted = True
+
+    def included_channels(
+        self,
+        index=None,
+        channels=None,
+        skip_master=True,
+    ):
+
+        if channels is None:
+            group = self.groups[index]
+            gps = {}
+            included_channels = set(range(len(group.channels)))
+            master_index = self.masters_db.get(index, None)
+            if master_index is not None:
+                included_channels.remove(master_index)
+
+            for dep in group.channel_dependencies:
+                if dep is None:
+                    continue
+                for gp_nr, ch_nr in dep.referenced_channels:
+                    if gp_nr == index:
+                        included_channels.remove(ch_nr)
+
+            if included_channels:
+                gps[index] = sorted(included_channels)
+
+            result = {index: gps}
+        else:
+            gps = {}
+            for item in channels:
+                if isinstance(item, (list, tuple)):
+                    if len(item) not in (2, 3):
+                        raise MdfException(
+                            "The items used for filtering must be strings, "
+                            "or they must match the first 3 argumens of the get "
+                            "method"
+                        )
+                    else:
+                        group, idx = self._validate_channel_selection(*item)
+                        if group not in gps:
+                            gps[group] = {idx}
+                        else:
+                            gps[group].add(idx)
+                else:
+                    name = item
+                    group, idx = self._validate_channel_selection(name)
+                    if group not in gps:
+                        gps[group] = {idx}
+                    else:
+                        gps[group].add(idx)
+
+            result = {}
+
+            for group_index, channels in gps.items():
+                group = self.groups[group_index]
+
+                channel_dependencies = [
+                    group.channel_dependencies[ch_nr]
+                    for ch_nr in channels
+                ]
+
+                master_index = self.masters_db.get(group_index, None)
+                if master_index is not None and master_index in channels:
+                    channels.remove(master_index)
+
+                for dep in channel_dependencies:
+                    if dep is None:
+                        continue
+                    for gp_nr, ch_nr in dep.referenced_channels:
+                        if gp_nr == group_index:
+                            try:
+                                channels.remove(ch_nr)
+                            except KeyError:
+                                pass
+
+                result[group_index] = {group_index: sorted(channels)}
+
+        return result
+
+    def _yield_selected_signals(
+        self,
+        index,
+        groups=None,
+        record_offset=0,
+        record_count=None,
+        skip_master=True,
+        version="4.20",
+    ):
+
+        if groups is None:
+            groups = self.included_channels(index)[index]
+
+        channels = groups[index]
+
+        group = self.groups[index]
+
+        encodings = [
+            None,
+        ]
+
+        self._set_temporary_master(None)
+
+        for idx, fragment in enumerate(
+            self._load_data(
+                group, record_offset=record_offset, record_count=record_count,
+            )
+        ):
+
+            self._set_temporary_master(self.get_master(index, data=fragment))
+
+            parents, dtypes = self._prepare_record(group)
+            if dtypes.itemsize:
+                group.record = fromstring(fragment[0], dtype=dtypes)
+            else:
+                group.record = None
+                continue
+
+            # the first fragment triggers and append that will add the
+            # metadata for all channels
+            if idx == 0:
+                signals = [
+                    self.get(
+                        group=index,
+                        index=channel_index,
+                        data=fragment,
+                        raw=True,
+                        ignore_invalidation_bits=True,
+                        samples_only=False,
+                    )
+                    for channel_index in channels
+                ]
+            else:
+                signals = [(self._master, None)]
+
+                for channel_index in channels:
+                    signals.append(
+                        self.get(
+                            group=index,
+                            index=channel_index,
+                            data=fragment,
+                            raw=True,
+                            ignore_invalidation_bits=True,
+                            samples_only=True,
+                        )
+                    )
+
+            if version < "4.00":
+                if idx == 0:
+                    for sig, channel_index in zip(signals, channels):
+                        if sig.samples.dtype.kind == "S":
+                            encodings.append(sig.encoding)
+                            strsig = self.get(
+                                group=index,
+                                index=channel_index,
+                                samples_only=True,
+                                ignore_invalidation_bits=True,
+                            )[0]
+                            sig.samples = sig.samples.astype(strsig.dtype)
+                            del strsig
+                            if sig.encoding != "latin-1":
+
+                                if sig.encoding == "utf-16-le":
+                                    sig.samples = (
+                                        sig.samples.view(uint16)
+                                        .byteswap()
+                                        .view(sig.samples.dtype)
+                                    )
+                                    sig.samples = encode(
+                                        decode(sig.samples, "utf-16-be"), "latin-1",
+                                    )
+                                else:
+                                    sig.samples = encode(
+                                        decode(sig.samples, sig.encoding), "latin-1",
+                                    )
+                        else:
+                            encodings.append(None)
+                else:
+                    for i, (sig, encoding) in enumerate(zip(signals, encodings)):
+
+                        if encoding:
+                            samples = sig[0]
+                            if encoding != "latin-1":
+
+                                if encoding == "utf-16-le":
+                                    samples = (
+                                        samples.view(uint16)
+                                        .byteswap()
+                                        .view(samples.dtype)
+                                    )
+                                    samples = encode(
+                                        decode(samples, "utf-16-be"), "latin-1"
+                                    )
+                                else:
+                                    samples = encode(
+                                        decode(samples, encoding), "latin-1"
+                                    )
+                                signals[i] = (samples, sig[1])
+
+            group.record = None
+            self._set_temporary_master(None)
+            yield signals
 
 
 if __name__ == "__main__":

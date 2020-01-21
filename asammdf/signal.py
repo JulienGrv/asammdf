@@ -122,6 +122,11 @@ class Signal(object):
                 self.bit_count = bit_count
 
             self.stream_sync = stream_sync
+
+            if invalidation_bits is not None and not isinstance(
+                invalidation_bits, np.ndarray
+            ):
+                invalidation_bits = np.array(invalidation_bits)
             self.invalidation_bits = invalidation_bits
 
             if conversion:
@@ -738,8 +743,8 @@ class Signal(object):
         """
         if not len(self.samples) or not len(new_timestamps):
             return Signal(
-                self.samples.copy(),
-                self.timestamps.copy(),
+                self.samples[:0].copy(),
+                self.timestamps[:0].copy(),
                 self.unit,
                 self.name,
                 comment=self.comment,
@@ -749,9 +754,7 @@ class Signal(object):
                 display_name=self.display_name,
                 attachment=self.attachment,
                 stream_sync=self.stream_sync,
-                invalidation_bits=self.invalidation_bits.copy()
-                if self.invalidation_bits is not None
-                else None,
+                invalidation_bits=None,
                 encoding=self.encoding,
             )
         else:
@@ -1095,6 +1098,10 @@ class Signal(object):
             samples = self.samples.copy()
         else:
             samples = self.conversion.convert(self.samples)
+            if samples.dtype.kind == 'S':
+                encoding = 'utf-8' if self.conversion.id == b'##CC' else 'latin-1'
+            else:
+                encoding = None
 
         return Signal(
             samples,
@@ -1109,7 +1116,7 @@ class Signal(object):
             stream_sync=self.stream_sync,
             invalidation_bits=self.invalidation_bits,
             source=self.source,
-            encoding=self.encoding,
+            encoding=encoding,
         )
 
     def validate(self, copy=True):

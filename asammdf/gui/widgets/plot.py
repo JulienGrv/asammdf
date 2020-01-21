@@ -3,7 +3,7 @@ import os
 
 bin_ = bin
 import logging
-from functools import partial
+from functools import partial, reduce
 from time import perf_counter
 from struct import unpack
 from uuid import uuid4
@@ -556,7 +556,10 @@ class Plot(QtWidgets.QWidget):
                 self.channel_selection,
             )
             item.setData(QtCore.Qt.UserRole, sig.name)
-            it = ChannelDisplay(sig.uuid, sig.unit, sig.samples.dtype.kind, 3, self)
+            tooltip = getattr(sig, "tooltip", "")
+            it = ChannelDisplay(
+                sig.uuid, sig.unit, sig.samples.dtype.kind, 3, tooltip, self
+            )
             it.setAttribute(QtCore.Qt.WA_StyledBackground)
 
             it.set_name(sig.name)
@@ -1206,8 +1209,8 @@ class _Plot(pg.PlotWidget):
                             ]
                             if len(samples):
                                 min_, max_ = (
-                                    np.amin(samples),
-                                    np.amax(samples),
+                                    np.nanmin(samples),
+                                    np.nanmax(samples),
                                 )
                             else:
                                 min_, max_ = 0, 1
@@ -1452,7 +1455,10 @@ class _Plot(pg.PlotWidget):
             else:
                 self.parent().keyPressEvent(event)
 
-    def trim(self, width, start, stop):
+    def trim(self):
+        (start, stop), _ = self.viewbox.viewRange()
+
+        width = self.width() - self.axis.width()
 
         for sig in self.signals:
             dim = len(sig.samples)
@@ -1524,10 +1530,7 @@ class _Plot(pg.PlotWidget):
                             sig.plot_texts = sig.texts[start_:stop_]
 
     def xrange_changed_handle(self):
-        (start, stop), _ = self.viewbox.viewRange()
-
-        width = self.width() - self.axis.width()
-        self.trim(width, start, stop)
+        self.trim()
 
         self.update_lines(force=True)
 
@@ -1669,8 +1672,8 @@ class _Plot(pg.PlotWidget):
             if len(sig.samples):
                 samples = sig.samples[np.isfinite(sig.samples)]
                 if len(samples):
-                    sig.min = np.amin(samples)
-                    sig.max = np.amax(samples)
+                    sig.min = np.nanmin(samples)
+                    sig.max = np.nanmax(samples)
                     sig.avg = np.mean(samples)
                     sig.rms = np.sqrt(np.mean(np.square(samples)))
                 else:
@@ -1741,6 +1744,9 @@ class _Plot(pg.PlotWidget):
             axis.hide()
             view_box.addItem(curve)
 
+        self.trim()
+        self.update_lines(force=True)
+
         for curve in self.curves[initial_index:]:
             curve.show()
 
@@ -1748,13 +1754,16 @@ class _Plot(pg.PlotWidget):
             self.set_current_uuid(self.signals[0].uuid)
 
         if self.signals:
+            ids = {id(s.timestamps): s.timestamps for s in self.signals}
+
+            #            self.all_timebase = self.timebase = np.unique(
+            #                np.concatenate([v for v in ids.values()])
+            #            )
             self.all_timebase = self.timebase = np.unique(
-                np.concatenate([sig.timestamps for sig in self.signals])
+                reduce(np.union1d, [v for v in ids.values()])
             )
         else:
             self.all_timebase = self.timebase = None
-
-        QtWidgets.QApplication.processEvents()
 
     def signal_by_uuid(self, uuid):
         for i, sig in enumerate(self.signals):

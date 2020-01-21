@@ -77,6 +77,7 @@ The main goals for this library are:
 
 * for version 4
 
+    * experiemental support for MDF v4.20 column oriented storage
     * functionality related to sample reduction block: the samples reduction blocks are simply ignored
     * handling of channel hierarchy: channel hierarchy is ignored
     * full handling of bus logging measurements: currently only CAN bus logging is implemented with the
@@ -148,6 +149,8 @@ Thanks to all who contributed with commits to *asammdf*:
 
 ```shell
 pip install asammdf
+# for the GUI 
+pip install asammdf[gui]
 # or for anaconda
 conda install -c conda-forge asammdf
 ```
@@ -163,6 +166,7 @@ asammdf uses the following libraries
 * natsort
 * cChardet : to detect non-standard unicode encodings
 * lxml : for canmatrix arxml support
+* lz4 : to speed up the disk IO peformance
 
 optional dependencies needed for exports
 
