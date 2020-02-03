@@ -26,6 +26,9 @@ def main(measurements=None):
     parser = _cmd_line_parser()
     args = parser.parse_args(sys.argv[1:])
     app = QtWidgets.QApplication(sys.argv)
+    lib_paths = app.libraryPaths()
+    if lib_paths:
+        app.addLibraryPath(f"{lib_paths[0]}/Library/plugins")
     app.setOrganizationName("py-asammdf")
     app.setOrganizationDomain("py-asammdf")
     app.setApplicationName("py-asammdf")
