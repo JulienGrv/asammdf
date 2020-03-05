@@ -1308,6 +1308,7 @@ class MDF3(object):
                 channel.comment = signal.comment
                 channel.source = new_source
                 channel.conversion = conversion
+                channel.display_name = display_name
                 gp_channels.append(channel)
 
                 offset += s_size
@@ -2272,7 +2273,7 @@ class MDF3(object):
         cycles_nr = len(signals[0][0])
         string_counter = 0
 
-        for signal, _ in signals:
+        for k_i,( signal, _ )in enumerate(signals):
             sig = signal
             names = sig.dtype.names
 
@@ -2294,6 +2295,7 @@ class MDF3(object):
                     str_dtype = gp.string_dtypes[string_counter]
                     signal = signal.astype(str_dtype)
                     string_counter += 1
+
                 fields.append(signal)
 
                 if signal.shape[1:]:
@@ -3052,7 +3054,11 @@ class MDF3(object):
         cycles_nr = group.channel_group.cycles_nr
 
         if time_ch_nr is None:
-            t = arange(cycles_nr, dtype=float64)
+            if fragment:
+                count = len(data_bytes) // group.channel_group.samples_byte_nr
+            else:
+                count = cycles_nr
+            t = arange(count, dtype=float64)
             metadata = ("time", 1)
         else:
             time_ch = group.channels[time_ch_nr]
@@ -3552,6 +3558,7 @@ class MDF3(object):
         index=None,
         channels=None,
         skip_master=True,
+        minimal=True,
     ):
 
         if channels is None:
@@ -3607,19 +3614,17 @@ class MDF3(object):
                     for ch_nr in channels
                 ]
 
-                master_index = self.masters_db.get(group_index, None)
-                if master_index is not None and master_index in channels:
-                    channels.remove(master_index)
+                if minimal:
 
-                for dep in channel_dependencies:
-                    if dep is None:
-                        continue
-                    for gp_nr, ch_nr in dep.referenced_channels:
-                        if gp_nr == group_index:
-                            try:
-                                channels.remove(ch_nr)
-                            except KeyError:
-                                pass
+                    for dep in channel_dependencies:
+                        if dep is None:
+                            continue
+                        for gp_nr, ch_nr in dep.referenced_channels:
+                            if gp_nr == group_index:
+                                try:
+                                    channels.remove(ch_nr)
+                                except KeyError:
+                                    pass
 
                 result[group_index] = {group_index: sorted(channels)}
 

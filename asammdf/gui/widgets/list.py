@@ -12,6 +12,7 @@ from ..utils import extract_mime_names
 class ListWidget(QtWidgets.QListWidget):
 
     itemsDeleted = QtCore.pyqtSignal(list)
+    set_time_offset = QtCore.pyqtSignal(list)
     items_rearranged = QtCore.pyqtSignal()
     add_channels_request = QtCore.pyqtSignal(list)
 
@@ -33,6 +34,7 @@ class ListWidget(QtWidgets.QListWidget):
     def keyPressEvent(self, event):
         key = event.key()
         modifiers = event.modifiers()
+
         if key == QtCore.Qt.Key_Delete and self.can_delete_items:
             selected_items = self.selectedItems()
             deleted = []
@@ -92,8 +94,8 @@ class ListWidget(QtWidgets.QListWidget):
             self.itemWidget(selected_items[0]).keyPressEvent(event)
 
         else:
-            super().keyPressEvent(event)
             self.parent().keyPressEvent(event)
+            event.ignore()
 
     def startDrag(self, supportedActions):
         selected_items = self.selectedItems()
@@ -104,20 +106,27 @@ class ListWidget(QtWidgets.QListWidget):
 
         for item in selected_items:
 
-            name = item.name.encode("utf-8")
             entry = item.entry
             computation = item.computation
 
+            widget = self.itemWidget(item)
+
+            color = widget.color
+            unit = widget.unit
+
             if entry == (-1, -1):
                 info = {
-                    "name": name,
+                    "name": item.name,
                     "computation": computation,
+                    "computed": True,
+                    "unit": unit,
+                    "color": color,
                 }
                 info = json.dumps(info).encode("utf-8")
             else:
-                info = name
+                info = item.name.encode("utf-8")
 
-            data.append(pack(f"<3Q{len(info)}s", entry[0], entry[1], len(info), info))
+            data.append(pack(f"<3q{len(info)}s", entry[0], entry[1], len(info), info))
 
         mimeData.setData(
             "application/octet-stream-asammdf", QtCore.QByteArray(b"".join(data))
@@ -164,6 +173,9 @@ class ListWidget(QtWidgets.QListWidget):
         menu.addSeparator()
         menu.addAction(self.tr("Set unit"))
         menu.addAction(self.tr("Set precision"))
+        menu.addSeparator()
+        menu.addAction(self.tr("Relative time base shift"))
+        menu.addAction(self.tr("Set time base start offset"))
         menu.addSeparator()
         menu.addAction(self.tr("Delete (Del)"))
 
@@ -262,6 +274,31 @@ class ListWidget(QtWidgets.QListWidget):
                     if item in selected_items:
                         widget.set_precision(precision)
                         widget.update()
+
+        elif action.text() in ("Relative time base shift", "Set time base start offset"):
+            selected_items = self.selectedItems()
+            if selected_items:
+
+                if action.text() == "Relative time base shift":
+                    offset, ok = QtWidgets.QInputDialog.getDouble(
+                        self, "Relative offset [s]", "Offset [s]:",
+                    )
+                    absolute = False
+                else:
+                    offset, ok = QtWidgets.QInputDialog.getDouble(
+                        self, "Absolute time start offset [s]", "Offset [s]:",
+                    )
+                    absolute = True
+                if ok:
+                    uuids = []
+
+                    for i in range(self.count()):
+                        item = self.item(i)
+                        widget = self.itemWidget(item)
+                        if item in selected_items:
+
+                            uuids.append(widget.uuid)
+                    self.set_time_offset.emit([absolute, offset, ] + uuids)
 
         elif action.text() == "Delete (Del)":
             event = QtGui.QKeyEvent(

@@ -19,6 +19,7 @@ from functools import lru_cache
 from time import perf_counter
 from lz4.frame import compress as lz_compress
 from lz4.frame import decompress as lz_decompress
+from traceback import format_exc
 
 from numpy import (
     arange,
@@ -94,6 +95,7 @@ from .utils import (
     extract_can_signal,
     load_can_database,
     VirtualChannelGroup,
+    all_blocks_addresses,
 )
 from .v4_blocks import (
     AttachmentBlock,
@@ -136,14 +138,18 @@ try:
     from .cutils import extract, sort_data_block, lengths, get_vlsd_offsets
 except:
 
-    def extract(signal_data, is_byte_array):
+    def extract(signal_data, is_byte_array, offsets=()):
+#        offsets_ = set(offsets)
         size = len(signal_data)
         positions = []
         values = []
         pos = 0
 
         while pos < size:
+
             positions.append(pos)
+#            if offsets_ and pos not in offsets_:
+#                raise Exception(f"VLSD offsets do not match the signal data:\n{positions}\n{offsets[:len(positions)]}")
             (str_size,) = UINT32_uf(signal_data, pos)
             pos = pos + 4 + str_size
             values.append(signal_data[pos - str_size : pos])
@@ -163,20 +169,33 @@ except:
     ):
         i = 0
         size = len(signal_data)
+        pos = 0
+        rem = b''
         while i < size:
             (rec_id,) = _unpack_stuct(signal_data, i)
             # skip record id
             i += record_id_nr
             rec_size = cg_size[rec_id]
             if rec_size:
+                if rec_size + pos + record_id_nr > size:
+                    rem = signal_data[pos:]
+                    break
                 endpoint = i + rec_size
                 partial_records[rec_id].append(signal_data[i:endpoint])
                 i = endpoint
             else:
                 (rec_size,) = UINT32_uf(signal_data, i)
                 endpoint = i + rec_size + 4
+                if endpoint > size:
+                    rem = signal_data[pos:]
+                    break
                 partial_records[rec_id].append(signal_data[i:endpoint])
                 i = endpoint
+            pos = i
+        else:
+            rem = b''
+
+        return rem
 
     def lengths(iterable):
         return [len(item) for item in iterable]
@@ -407,7 +426,7 @@ class MDF4(object):
 
             logger.info(message)
 
-        return flags == 0
+        return flags
 
     def _read(self, mapped=False):
 
@@ -430,9 +449,14 @@ class MDF4(object):
 
         if self.version >= "4.10":
             # Check for finalization past version 4.10
-            is_finalised = self._check_finalised()
+            finalisation_flags = self._check_finalised()
 
-            if not is_finalised:
+            if finalisation_flags:
+                addresses = all_blocks_addresses(self._file)
+            else:
+                addresses = []
+
+            if finalisation_flags:
                 message = f"Attempting finalization of {self.name}"
                 logger.info(message)
                 self._finalize()
@@ -576,23 +600,29 @@ class MDF4(object):
 
             address = group.data_block_addr
 
-            if new_groups:
-                channel_group = new_groups[0].channel_group
+            total_size = 0
+            inval_total_size = 0
+            block_type = b"##DT"
+
+            for new_group in new_groups:
+
+                channel_group = new_group.channel_group
                 if channel_group.flags & v4c.FLAG_CG_REMOTE_MASTER:
                     block_type = b"##DV"
-                    total_size = channel_group.samples_byte_nr * channel_group.cycles_nr
-                    inval_total_size = (
+                    total_size += channel_group.samples_byte_nr * channel_group.cycles_nr
+                    inval_total_size += (
                         channel_group.invalidation_bytes_nr * channel_group.cycles_nr
                     )
                 else:
                     block_type = b"##DT"
-                    total_size = (
+                    total_size += (
                         channel_group.samples_byte_nr
                         + channel_group.invalidation_bytes_nr
                     ) * channel_group.cycles_nr
-                    inval_total_size = 0
-            else:
-                block_type = b"##DT"
+
+#            if not is_finalised:
+#                total_size = None
+#                inval_total_size = None
 
             info, uses_ld = self._get_data_blocks_info(
                 address=address,
@@ -611,6 +641,8 @@ class MDF4(object):
             self.groups.extend(new_groups)
 
             dg_addr = group.next_dg_addr
+
+        #TODO: attempt finalisation here
 
         # all channels have been loaded so now we can link the
         # channel dependencies and load the signal data for VLSD channels
@@ -739,7 +771,9 @@ class MDF4(object):
         #             continue
 
         #         can_ids = Signal(
-        #             _sig.samples["CAN_DataFrame.ID"], _sig.timestamps, name="can_ids",
+        #             _sig.samples["CAN_DataFrame.ID"] & 0x1fffffff,
+        #             _sig.timestamps,
+        #             name="can_ids",
         #         )
 
         #         all_can_ids = unique(can_ids.samples).tolist()
@@ -1174,7 +1208,7 @@ class MDF4(object):
                             group=i,
                             data=fragment,
                             samples_only=True,
-                        )[0]
+                        )[0] & 0x1fffffff
 
                         if len(bus_ids):
 
@@ -2106,8 +2140,7 @@ class MDF4(object):
             else:
                 if source is not None:
                     for gp_nr, ch_nr in self.channels_db[name]:
-                        source_name = self._get_source_name(gp_nr, ch_nr)
-                        if source_name == source:
+                        if source in self._get_source_name(gp_nr, ch_nr):
                             break
                     else:
                         raise MdfException(f"{name} with source {source} not found")
@@ -2144,7 +2177,13 @@ class MDF4(object):
         return gp_nr, ch_nr
 
     def _get_source_name(self, group, index):
-        return self.groups[group].channels[index].source.name or ""
+        source = self.groups[group].channels[index].source
+        cn_source = source.name if source else ""
+
+        source = self.groups[group].channel_group.acq_source
+        cg_source = source.name if source else ""
+
+        return (cn_source, cg_source)
 
     def _set_temporary_master(self, master):
         self._master = master
@@ -3586,7 +3625,6 @@ class MDF4(object):
                 inval_bits.append(zeros(cycles_nr, dtype=bool))
 
             inval_bits.reverse()
-
             invalidation_bytes_nr = len(inval_bits) // 8
 
             gp.channel_group.invalidation_bytes_nr = invalidation_bytes_nr
@@ -4918,7 +4956,7 @@ class MDF4(object):
             if sig_type in (v4c.SIGNAL_TYPE_SCALAR, v4c.SIGNAL_TYPE_STRING):
 
                 s_type, s_size = fmt_to_datatype_v4(samples.dtype, samples.shape)
-                byte_size = s_size // 8
+                byte_size = s_size // 8 or 1
 
                 fields.append(samples)
                 types.append((field_name, samples.dtype, samples.shape[1:]))
@@ -5348,7 +5386,7 @@ class MDF4(object):
             if sig_type in (v4c.SIGNAL_TYPE_SCALAR, v4c.SIGNAL_TYPE_STRING):
 
                 s_type, s_size = fmt_to_datatype_v4(samples.dtype, samples.shape)
-                byte_size = s_size // 8
+                byte_size = s_size // 8 or 1
 
                 fields.append(samples)
                 types.append((field_name, samples.dtype, samples.shape[1:]))
@@ -7404,12 +7442,13 @@ class MDF4(object):
 
         if channel_type == v4c.CHANNEL_TYPE_VLSD:
             count_ = len(vals)
+
             signal_data, with_bounds = self._load_signal_data(
                 group=grp, index=ch_nr, offset=record_start, count=count_,
             )
 
             if signal_data:
-                if data_type == v4c.DATA_TYPE_BYTEARRAY:
+                if data_type in (v4c.DATA_TYPE_BYTEARRAY, v4c.DATA_TYPE_UNSIGNED_INTEL, v4c.DATA_TYPE_UNSIGNED_MOTOROLA):
                     vals = extract(signal_data, 1)
                 else:
                     vals = extract(signal_data, 0)
@@ -7417,7 +7456,7 @@ class MDF4(object):
                 if not with_bounds:
                     vals = vals[record_start : record_start + count_]
 
-                if data_type != v4c.DATA_TYPE_BYTEARRAY:
+                if data_type not in (v4c.DATA_TYPE_BYTEARRAY, v4c.DATA_TYPE_UNSIGNED_INTEL, v4c.DATA_TYPE_UNSIGNED_MOTOROLA):
 
                     if data_type == v4c.DATA_TYPE_STRING_UTF_16_BE:
                         encoding = "utf-16-be"
@@ -7671,6 +7710,7 @@ class MDF4(object):
         index=None,
         channels=None,
         skip_master=True,
+        minimal=True,
     ):
 
         if channels is None:
@@ -7808,59 +7848,60 @@ class MDF4(object):
                 master = self.virtual_groups_map[gp_index]
                 group = self.groups[gp_index]
 
-                channel_dependencies = [
-                    group.channel_dependencies[ch_nr]
-                    for ch_nr in channels
-                ]
+                if minimal:
 
-                for dependencies in channel_dependencies:
-                    if dependencies is None:
-                        continue
+                    channel_dependencies = [
+                        group.channel_dependencies[ch_nr]
+                        for ch_nr in channels
+                    ]
 
-                    if all(
-                        not isinstance(dep, ChannelArrayBlock) for dep in dependencies
-                    ):
+                    for dependencies in channel_dependencies:
+                        if dependencies is None:
+                            continue
 
-                        for _, ch_nr in dependencies:
-                            try:
-                                channels.remove(ch_nr)
-                            except KeyError:
-                                pass
-                    else:
-                        for dep in dependencies:
-                            for referenced_channels in (
-                                dep.axis_channels,
-                                dep.dynamic_size_channels,
-                                dep.input_quantity_channels,
-                            ):
-                                for gp_nr, ch_nr in referenced_channels:
+                        if all(
+                            not isinstance(dep, ChannelArrayBlock) for dep in dependencies
+                        ):
+
+                            for _, ch_nr in dependencies:
+                                try:
+                                    channels.remove(ch_nr)
+                                except KeyError:
+                                    pass
+                        else:
+                            for dep in dependencies:
+                                for referenced_channels in (
+                                    dep.axis_channels,
+                                    dep.dynamic_size_channels,
+                                    dep.input_quantity_channels,
+                                ):
+                                    for gp_nr, ch_nr in referenced_channels:
+                                        if gp_nr == gp_index:
+                                            try:
+                                                channels.remove(ch_nr)
+                                            except KeyError:
+                                                pass
+
+                                if dep.output_quantity_channel:
+                                    gp_nr, ch_nr = dep.output_quantity_channel
                                     if gp_nr == gp_index:
                                         try:
                                             channels.remove(ch_nr)
                                         except KeyError:
                                             pass
 
-                            if dep.output_quantity_channel:
-                                gp_nr, ch_nr = dep.output_quantity_channel
-                                if gp_nr == gp_index:
-                                    try:
-                                        channels.remove(ch_nr)
-                                    except KeyError:
-                                        pass
-
-                            if dep.comparison_quantity_channel:
-                                gp_nr, ch_nr = dep.comparison_quantity_channel
-                                if gp_nr == gp_index:
-                                    try:
-                                        channels.remove(ch_nr)
-                                    except KeyError:
-                                        pass
+                                if dep.comparison_quantity_channel:
+                                    gp_nr, ch_nr = dep.comparison_quantity_channel
+                                    if gp_nr == gp_index:
+                                        try:
+                                            channels.remove(ch_nr)
+                                        except KeyError:
+                                            pass
 
                 if master not in result:
                     result[master] = {}
-                master_index = self.masters_db.get(gp_index, None)
-                if master_index is not None and master_index in channels:
-                    channels.remove(master_index)
+                    result[master][master] = [self.masters_db[master]]
+
                 result[master][gp_index] = sorted(channels)
 
         return result
@@ -7872,8 +7913,9 @@ class MDF4(object):
         record_offset=0,
         record_count=None,
         skip_master=True,
-        version="4.20",
+        version=None,
     ):
+        version = version or self.version
         virtual_channel_group = self.virtual_groups[index]
         record_size = virtual_channel_group.record_size
 
@@ -7894,7 +7936,7 @@ class MDF4(object):
             count = self._read_fragment_size // record_size or 1
         else:
             if version < "4.20":
-                count = 32 * 1024 * 1024 // record_size or 1
+                count = 8 * 1024 * 1024 // record_size or 1
             else:
                 count = 128 * 1024 * 1024 // record_size or 1
 
@@ -7969,14 +8011,17 @@ class MDF4(object):
                     if idx == 0:
                         for sig, channel_index in zip(signals, channels):
                             if sig.samples.dtype.kind == "S":
-                                encodings[group_index].append(sig.encoding)
+
                                 strsig = self.get(
                                     group=group_index,
                                     index=channel_index,
                                     samples_only=True,
                                     ignore_invalidation_bits=True,
                                 )[0]
-                                sig.samples = sig.samples.astype(strsig.dtype)
+
+                                _dtype = strsig.dtype
+                                sig.samples = sig.samples.astype(_dtype)
+                                encodings[group_index].append((sig.encoding, _dtype))
                                 del strsig
                                 if sig.encoding != "latin-1":
 
@@ -7994,14 +8039,16 @@ class MDF4(object):
                                             decode(sig.samples, sig.encoding),
                                             "latin-1",
                                         )
+                                sig.samples = sig.samples.astype(_dtype)
                             else:
                                 encodings[group_index].append(None)
                     else:
-                        for i, (sig, encoding) in enumerate(
+                        for i, (sig, encoding_tuple) in enumerate(
                             zip(signals, encodings[group_index])
                         ):
 
-                            if encoding:
+                            if encoding_tuple:
+                                encoding, _dtype = encoding_tuple
                                 samples = sig[0]
                                 if encoding != "latin-1":
 
@@ -8018,7 +8065,8 @@ class MDF4(object):
                                         samples = encode(
                                             decode(samples, encoding), "latin-1"
                                         )
-                                    signals[i] = (samples, sig[1])
+                                samples = samples.astype(_dtype)
+                                signals[i] = (samples, sig[1])
 
                 grp.record = None
 
@@ -8464,6 +8512,7 @@ class MDF4(object):
             group=index,
             ignore_invalidation_bits=ignore_invalidation_bits,
         )
+        can_ids.samples = can_ids.samples & 0x1fffffff
         payload = self.get(
             "CAN_DataFrame.DataBytes",
             group=index,
@@ -9514,10 +9563,12 @@ class MDF4(object):
         Attempt finalization of the file.
         :return:    None
         """
+
         flags = self.identification["unfinalized_standard_flags"]
 
         shim = FinalizationShim(self._file, flags)
         shim.load_blocks()
+
         shim.finalize()
 
         # In-memory finalization performed, inject as a shim between the original file and asammdf.
@@ -9579,6 +9630,7 @@ class MDF4(object):
                 message = f"invalid record id size {record_id_nr}"
                 raise MdfException(message)
 
+            rem = b''
             for info in group.data_blocks:
                 address, size, block_size, block_type, param = (
                     info.address,
@@ -9588,63 +9640,146 @@ class MDF4(object):
                     info.param,
                 )
 
-                partial_records = {id_: [] for _, id_ in groups}
+                if block_type != v4c.DT_BLOCK:
+                    partial_records = {id_: [] for _, id_ in groups}
+                    new_data = read(block_size)
 
-                seek(address)
-                new_data = read(block_size)
-                if block_type == v4c.DZ_BLOCK_DEFLATE:
-                    new_data = decompress(new_data, 0, size)
-                elif block_type == v4c.DZ_BLOCK_TRANSPOSED:
-                    new_data = decompress(new_data, 0, size)
-                    cols = param
-                    lines = size // cols
+                    if block_type == v4c.DZ_BLOCK_DEFLATE:
+                        new_data = decompress(new_data, 0, size)
+                    elif block_type == v4c.DZ_BLOCK_TRANSPOSED:
+                        new_data = decompress(new_data, 0, size)
+                        cols = param
+                        lines = size // cols
 
-                    nd = fromstring(new_data[: lines * cols], dtype=uint8)
-                    nd = nd.reshape((cols, lines))
-                    new_data = nd.T.tostring() + new_data[lines * cols :]
+                        nd = fromstring(new_data[: lines * cols], dtype=uint8)
+                        nd = nd.reshape((cols, lines))
+                        new_data = nd.T.tostring() + new_data[lines * cols :]
 
-                sort_data_block(
-                    new_data, partial_records, cg_size, record_id_nr, _unpack_stuct
-                )
+                    new_data = rem + new_data
 
-                for rec_id, new_data in partial_records.items():
+                    try:
+                        rem = sort_data_block(
+                            new_data, partial_records, cg_size, record_id_nr, _unpack_stuct
+                        )
+                    except:
+                        print(format_exc())
+                        raise
 
-                    channel_group = cg_map[rec_id]
+                    for rec_id, new_data in partial_records.items():
 
-                    if channel_group.address in self._cn_data_map:
-                        dg_cntr, ch_cntr = self._cn_data_map[channel_group.address]
-                    else:
-                        dg_cntr, ch_cntr = None, None
+                        channel_group = cg_map[rec_id]
 
-                    if new_data:
-
-                        address = tell()
-
-                        size = write(b"".join(new_data))
-
-                        if dg_cntr is not None:
-                            offsets, size = get_vlsd_offsets(new_data)
-
-                            if size:
-                                info = SignalDataBlockInfo(
-                                    address=address,
-                                    size=size,
-                                    count=len(offsets),
-                                    offsets=offsets,
-                                )
-                                self.groups[dg_cntr].signal_data[ch_cntr].append(info)
-
+                        if channel_group.address in self._cn_data_map:
+                            dg_cntr, ch_cntr = self._cn_data_map[channel_group.address]
                         else:
-                            if size:
-                                block_info = DataBlockInfo(
-                                    address=address,
-                                    block_type=v4c.DT_BLOCK,
-                                    raw_size=size,
-                                    size=size,
-                                    param=0,
-                                )
-                                final_records[rec_id].append(block_info)
-                                size = 0
+                            dg_cntr, ch_cntr = None, None
+
+                        if new_data:
+
+                            address = tell()
+
+                            size = write(b"".join(new_data))
+
+                            if dg_cntr is not None:
+                                offsets, size = get_vlsd_offsets(new_data)
+
+                                if size:
+                                    info = SignalDataBlockInfo(
+                                        address=address,
+                                        size=size,
+                                        count=len(offsets),
+                                        offsets=offsets,
+                                    )
+                                    self.groups[dg_cntr].signal_data[ch_cntr].append(info)
+
+                            else:
+                                if size:
+                                    block_info = DataBlockInfo(
+                                        address=address,
+                                        block_type=v4c.DT_BLOCK,
+                                        raw_size=size,
+                                        size=size,
+                                        param=0,
+                                    )
+                                    final_records[rec_id].append(block_info)
+                                    size = 0
+                else:
+
+                    seek(address)
+                    limit = 32 * 1024 * 1024
+                    while block_size:
+                        if block_size > limit:
+                            block_size -= limit
+                            new_data = rem + read(limit)
+                        else:
+                            new_data = rem + read(block_size)
+                            block_size = 0
+
+                        partial_records = {id_: [] for _, id_ in groups}
+#                        if self._file.tell() > 1_000_000_000:
+#                            break
+
+                        rem = sort_data_block(
+                            new_data, partial_records, cg_size, record_id_nr, _unpack_stuct
+                        )
+
+                        for rec_id, new_data in partial_records.items():
+
+                            channel_group = cg_map[rec_id]
+
+                            if channel_group.address in self._cn_data_map:
+                                dg_cntr, ch_cntr = self._cn_data_map[channel_group.address]
+                            else:
+                                dg_cntr, ch_cntr = None, None
+
+                            if new_data:
+
+                                if dg_cntr is not None:
+                                    address = tell()
+                                    size = write(b"".join(new_data))
+
+                                    offsets, size = get_vlsd_offsets(new_data)
+
+                                    if size:
+                                        info = SignalDataBlockInfo(
+                                            address=address,
+                                            size=size,
+                                            count=len(offsets),
+                                            offsets=offsets,
+                                        )
+                                        self.groups[dg_cntr].signal_data[ch_cntr].append(info)
+
+                                else:
+                                    if size:
+#                                        block_info = DataBlockInfo(
+#                                            address=address,
+#                                            block_type=v4c.DT_BLOCK,
+#                                            raw_size=size,
+#                                            size=size,
+#                                            param=0,
+#                                        )
+#                                        final_records[rec_id].append(block_info)
+#                                        size = 0
+
+                                        address = tell()
+
+                                        new_data = b"".join(new_data)
+
+                                        raw_size = len(new_data)
+                                        new_data = lz_compress(new_data)
+                                        size = len(new_data)
+                                        self._tempfile.write(new_data)
+
+                                        block_info = InvalidationBlockInfo(
+                                            address=address,
+                                            block_type=v4c.DZ_BLOCK_LZ,
+                                            raw_size=raw_size,
+                                            size=size,
+                                            param=None,
+                                        )
+
+                                        final_records[rec_id].append(block_info)
+                                        size = 0
 
             for idx, rec_id in groups:
                 group = self.groups[idx]

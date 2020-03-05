@@ -516,6 +516,7 @@ class MDF(object):
 
             idx = 0
             for j, sigs in enumerate(self._yield_selected_signals(group_index, groups=included_channels)):
+
                 if not sigs:
                     break
                 if j == 0:
@@ -549,6 +550,7 @@ class MDF(object):
                         )
                         if stop_index == len(master):
                             needs_cutting = False
+
                 elif stop is None:
                     fragment_stop = None
                     if master[-1] < start:
@@ -597,9 +599,14 @@ class MDF(object):
                         .timestamps
                     )
 
+                    if not len(master):
+                        continue
+
                     signals = [
-                        sig.interp(
-                            master,
+                        sig.cut(
+                            master[0],
+                            master[-1],
+                            include_ends=include_ends,
                             interpolation_mode=interpolation_mode,
                         )
                         for sig in signals
@@ -1462,6 +1469,10 @@ class MDF(object):
             option to create a new "__samples_origin" channel that will hold
             the index of the measurement from where each timestamp originated
 
+        kwargs :
+
+            use_display_names (False) : bool
+
         Returns
         -------
         concatenate : MDF
@@ -1482,6 +1493,7 @@ class MDF(object):
         mdf_nr = len(files)
 
         input_types = [isinstance(mdf, MDF) for mdf in files]
+        use_display_names = kwargs.get("use_display_names", False)
 
         versions = []
         if sync:
@@ -1567,13 +1579,19 @@ class MDF(object):
 
         for mdf_index, (offset, mdf) in enumerate(zip(offsets, files)):
             if not isinstance(mdf, MDF):
-                mdf = MDF(mdf)
+                mdf = MDF(mdf, use_display_names=use_display_names)
 
             mdf.configure(copy_on_get=False)
 
             if mdf_index == 0:
                 last_timestamps = [None for gp in mdf.virtual_groups]
                 groups_nr = len(last_timestamps)
+
+            else:
+                if len(mdf.virtual_groups) != groups_nr:
+                    raise MdfException(
+                        f"internal structure of file <{mdf.name}> is different; different channel groups count"
+                    )
 
             for i, group_index in enumerate(mdf.virtual_groups):
                 included_channels = mdf.included_channels(group_index)[group_index]
@@ -1715,6 +1733,10 @@ class MDF(object):
         sync : bool
             sync the files based on the start of measurement, default *True*
 
+        kwargs :
+
+            use_display_names (False) : bool
+
         Returns
         -------
         stacked : MDF
@@ -1727,6 +1749,7 @@ class MDF(object):
         version = validate_version_argument(version)
 
         callback = kwargs.get("callback", None)
+        use_display_names = kwargs.get("use_display_names", False)
 
         stacked = MDF(version=version, callback=callback)
 
@@ -1775,7 +1798,7 @@ class MDF(object):
 
         for mdf_index, (offset, mdf) in enumerate(zip(offsets, files)):
             if not isinstance(mdf, MDF):
-                mdf = MDF(mdf)
+                mdf = MDF(mdf, use_display_names=use_display_names)
 
             mdf.configure(copy_on_get=False)
 
@@ -2093,6 +2116,7 @@ class MDF(object):
         copy_master=True,
         ignore_value2text_conversions=False,
         record_count=None,
+        validate=False,
     ):
         """ retrieve the channels listed in *channels* argument as *Signal*
         objects
@@ -2123,6 +2147,11 @@ class MDF(object):
             used, and the conversion will not be applied.
 
             .. versionadded:: 5.8.0
+
+        validate (False) : bool
+            consider the invalidation bits
+
+            .. versionadded:: 5.16.0
 
         Returns
         -------
@@ -2173,7 +2202,7 @@ class MDF(object):
 
         self._link_attributes()
 
-        virtual_groups = self.included_channels(channels=channels)
+        virtual_groups = self.included_channels(channels=channels, minimal=False, skip_master=False)
 
         output_signals = {}
 
@@ -2219,16 +2248,14 @@ class MDF(object):
                             sig.invalidation_bits = inval
 
                 else:
+                    sig, _ = sigs[0]
+                    next_pos = current_pos + len(sig)
+                    master[current_pos:next_pos] = sig
 
-                    for j, (signal, (sig, inval)) in enumerate(zip(signals, sigs)):
-                        if j == 0:
-                            next_pos = current_pos + len(sig)
-                            master[current_pos:next_pos] = sig
-                        else:
-
-                            signal.samples[current_pos:next_pos] = sig
-                            if signal.invalidation_bits is not None:
-                                signal.invalidation_bits[current_pos:next_pos] = inval
+                    for signal, (sig, inval) in zip(signals, sigs[1:]):
+                        signal.samples[current_pos:next_pos] = sig
+                        if signal.invalidation_bits is not None:
+                            signal.invalidation_bits[current_pos:next_pos] = inval
 
                 current_pos = next_pos
 
@@ -2251,15 +2278,13 @@ class MDF(object):
 
         if not raw:
             if ignore_value2text_conversions:
-                if self.version < "4.00":
-                    text_conversion = 11
-                else:
-                    text_conversion = 7
                 for signal in signals:
                     conversion = signal.conversion
-                    if conversion and conversion.conversion_type < text_conversion:
-                        signal.samples = conversion.convert(signal.samples)
-                    signal.raw = False
+                    if conversion:
+                        samples = conversion.convert(signal.samples)
+                        if samples.dtype.kind not in 'US':
+                            signal.samples = samples
+                    signal.raw = True
                     signal.conversion = None
             else:
                 for signal in signals:
@@ -2270,6 +2295,9 @@ class MDF(object):
                     signal.conversion = None
                     if signal.samples.dtype.kind == 'S':
                         signal.encoding = 'utf-8' if self.version >= '4.00' else 'latin-1'
+
+        if validate:
+            signals = [sig.validate() for sig in signals]
 
         return signals
 
@@ -2838,6 +2866,7 @@ class MDF(object):
                         copy_master=False,
                         record_offset=record_offset,
                         record_count=record_count,
+                        validate=True,
                     )
                 ]
 
@@ -3116,12 +3145,16 @@ class MDF(object):
                 (None, gp_index, ch_index)
                 for gp_index, channel_indexes in self.included_channels(virtual_group_index)[virtual_group_index].items()
                 for ch_index in channel_indexes
+                if ch_index != self.masters_db.get(gp_index, None)
             ]
 
             signals = [
                 signal.validate(copy=False)
                 for signal in self.select(
-                    channels, raw=True, copy_master=False,
+                    channels,
+                    raw=True,
+                    copy_master=False,
+                    validate=True,
                 )
             ]
 
@@ -3138,16 +3171,13 @@ class MDF(object):
 
             if not raw:
                 if ignore_value2text_conversions:
-                    if self.version < "4.00":
-                        text_conversion = 11
-                    else:
-                        text_conversion = 7
 
                     for signal in signals:
                         conversion = signal.conversion
-                        if conversion and conversion.conversion_type < text_conversion:
-                            signal.samples = conversion.convert(signal.samples)
-
+                        if conversion:
+                            samples = conversion.convert(signal.samples)
+                            if samples.dtype.kind not in 'US':
+                                signal.samples = samples
                 else:
                     for signal in signals:
                         if signal.conversion:
@@ -3271,7 +3301,7 @@ class MDF(object):
         if self._callback:
             out._callback = out._mdf._callback = self._callback
 
-        max_flags = {}
+        max_flags = []
 
         valid_dbc_files = []
         for dbc_name in dbc_files:
@@ -3399,7 +3429,9 @@ class MDF(object):
                                             name=signal["name"],
                                             comment=signal["comment"],
                                             unit=signal["unit"],
+                                            invalidation_bits=signal["invalidation_bits"] if ignore_invalid_signals else None,
                                         )
+
                                         sig.comment = f"""\
 <CNcomment>
 <TX>{sig.comment}</TX>
@@ -3409,20 +3441,7 @@ class MDF(object):
     </display>
 </names>
 </CNcomment>"""
-
                                         sigs.append(sig)
-
-                                        max_flags_entry = index, name_
-
-                                        if max_flags_entry in max_flags:
-                                            max_flags[max_flags_entry] = (
-                                                max_flags[max_flags_entry]
-                                                and signal["is_max"]
-                                            )
-                                        else:
-                                            max_flags[max_flags_entry] = signal[
-                                                "is_max"
-                                            ]
 
                                     cg_nr = out.append(
                                         sigs,
@@ -3434,21 +3453,28 @@ class MDF(object):
                                         cg_nr
                                     ].channel_group.comment = f"{message} 0x{msg_id:X}"
 
+                                    if ignore_invalid_signals:
+                                        max_flags.append([False])
+                                        for ch_index, sig in enumerate(sigs, 1):
+                                            max_flags[cg_nr].append(np.all(sig.invalidation_bits))
+
                                 else:
+
                                     index = msg_map[entry]
 
-                                    sigs = [(t, None)]
+                                    sigs = []
 
                                     for name_, signal in signals.items():
 
-                                        sigs.append((signal["samples"], None))
+                                        sigs.append((signal["samples"], signal["invalidation_bits"] if ignore_invalid_signals else None))
 
-                                        max_flags_entry = index, name_
+                                        t = signal["t"]
 
-                                        max_flags[max_flags_entry] = (
-                                            max_flags[max_flags_entry]
-                                            and signal["is_max"]
-                                        )
+                                    if ignore_invalid_signals:
+                                        for ch_index, sig in enumerate(sigs, 1):
+                                            max_flags[index][ch_index] = max_flags[index][ch_index] or np.all(sig[1])
+
+                                    sigs.insert(0, (t, None))
 
                                     out.extend(index, sigs)
                     self._set_temporary_master(None)
@@ -3477,7 +3503,7 @@ class MDF(object):
 
             for i, group in enumerate(out.groups):
                 for j, channel in enumerate(group.channels[1:], 1):
-                    if not max_flags[(i, channel.name)]:
+                    if not max_flags[i][j-1]:
                         to_keep.append((None, i, j))
 
             tmp = out.filter(to_keep, version)

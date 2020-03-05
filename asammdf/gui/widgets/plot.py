@@ -50,12 +50,17 @@ class Plot(QtWidgets.QWidget):
     clicked = QtCore.pyqtSignal()
     cursor_moved_signal = QtCore.pyqtSignal(object, float)
     cursor_removed_signal = QtCore.pyqtSignal(object)
+    region_moved_signal = QtCore.pyqtSignal(object, list)
+    region_removed_signal = QtCore.pyqtSignal(object)
 
     def __init__(self, signals, with_dots=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setContentsMargins(0, 0, 0, 0)
 
         self.info_uuid = None
+
+        self._range_start = None
+        self._range_stop = None
 
         main_layout = QtWidgets.QVBoxLayout(self)
         # self.setLayout(main_layout)
@@ -105,6 +110,7 @@ class Plot(QtWidgets.QWidget):
             self.channel_selection_row_changed
         )
         self.channel_selection.add_channels_request.connect(self.add_channels_request)
+        self.channel_selection.set_time_offset.connect(self.plot.set_time_offset)
         self.plot.add_channels_request.connect(self.add_channels_request)
         self.setAcceptDrops(True)
 
@@ -359,6 +365,8 @@ class Plot(QtWidgets.QWidget):
             stats = self.plot.get_stats(self.info_uuid, fmt)
             self.info.set_stats(stats)
 
+        self.region_moved_signal.emit(self, [start, stop])
+
     def xrange_changed(self):
         if self.info.isVisible():
             fmt = self.widget_by_uuid(self.info_uuid).fmt
@@ -492,7 +500,7 @@ class Plot(QtWidgets.QWidget):
         elif (key, modifiers) in self.plot.keyboard_events:
             self.plot.keyPressEvent(event)
         else:
-            self.parent().keyPressEvent(event)
+            event.ignore()
 
     def range_removed(self):
         for i in range(self.channel_selection.count()):
@@ -503,12 +511,17 @@ class Plot(QtWidgets.QWidget):
             item.set_value("")
             self.cursor_info.setText("")
 
+        self._range_start = None
+        self._range_stop = None
+
         if self.plot.cursor1:
             self.plot.cursor_moved.emit()
         if self.info.isVisible():
             fmt = self.widget_by_uuid(self.info_uuid).fmt
             stats = self.plot.get_stats(self.info_uuid, fmt)
             self.info.set_stats(stats)
+
+        self.region_removed_signal.emit(self)
 
     def computation_channel_inserted(self):
         sig = self.plot.signals[-1]
@@ -518,7 +531,8 @@ class Plot(QtWidgets.QWidget):
         else:
             name, unit = sig.name, sig.unit
         item = ListItem((-1, -1), name, sig.computation, self.channel_selection)
-        it = ChannelDisplay(sig.uuid, unit, sig.samples.dtype.kind, 3, self)
+        tooltip = getattr(sig, "tooltip", "")
+        it = ChannelDisplay(sig.uuid, unit, sig.samples.dtype.kind, 3, tooltip, self)
         it.setAttribute(QtCore.Qt.WA_StyledBackground)
 
         it.set_name(name)
@@ -545,6 +559,20 @@ class Plot(QtWidgets.QWidget):
         for sig in channels:
             sig.uuid = uuid4()
 
+        invalid = []
+
+        for channel in channels:
+            if np.any(np.diff(channel.timestamps) < 0):
+                invalid.append(channel.name)
+
+        if invalid:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "The following channels do not have monotonous increasing time stamps:",
+                f"The following channels do not have monotonous increasing time stamps:\n{', '.join(invalid)}",
+            )
+            self.plot._can_trim = False
+
         self.plot.add_new_channels(channels)
 
         for sig in channels:
@@ -552,7 +580,7 @@ class Plot(QtWidgets.QWidget):
             item = ListItem(
                 (sig.group_index, sig.channel_index),
                 sig.name,
-                None,
+                sig.computation,
                 self.channel_selection,
             )
             item.setData(QtCore.Qt.UserRole, sig.name)
@@ -663,6 +691,7 @@ class _Plot(pg.PlotWidget):
         super().__init__()
 
         self._last_update = perf_counter()
+        self._can_trim = True
 
         self.setAcceptDrops(True)
 
@@ -682,6 +711,7 @@ class _Plot(pg.PlotWidget):
         self.standalone = kwargs.get("standalone", False)
 
         self.region = None
+        self.region_lock = None
         self.cursor1 = None
         self.cursor2 = None
         self.signals = signals or []
@@ -691,12 +721,13 @@ class _Plot(pg.PlotWidget):
 
         self.disabled_keys = set()
 
-        if self.signals:
-            self.all_timebase = self.timebase = np.unique(
-                np.concatenate([sig.timestamps for sig in self.signals])
-            )
-        else:
-            self.all_timebase = self.timebase = []
+        self._timebase_db = {}
+        for sig in self.signals:
+            if id(sig.timestamps) not in self._timebase_db:
+                self._timebase_db[id(sig.timestamps)] = set()
+            self._timebase_db[id(sig.timestamps)].add(sig.uuid)
+
+        self._compute_all_timebase()
 
         self.showGrid(x=True, y=True)
 
@@ -754,6 +785,7 @@ class _Plot(pg.PlotWidget):
                 (QtCore.Qt.Key_R, QtCore.Qt.NoModifier),
                 (QtCore.Qt.Key_S, QtCore.Qt.ControlModifier),
                 (QtCore.Qt.Key_S, QtCore.Qt.NoModifier),
+                (QtCore.Qt.Key_Y, QtCore.Qt.NoModifier),
                 (QtCore.Qt.Key_Left, QtCore.Qt.NoModifier),
                 (QtCore.Qt.Key_Right, QtCore.Qt.NoModifier),
                 (QtCore.Qt.Key_H, QtCore.Qt.NoModifier),
@@ -875,7 +907,7 @@ class _Plot(pg.PlotWidget):
 
     def set_signal_enable(self, uuid, state):
 
-        _, index = self.signal_by_uuid(uuid)
+        sig, index = self.signal_by_uuid(uuid)
 
         if state in (QtCore.Qt.Checked, True, 1):
             self.signals[index].enable = True
@@ -883,11 +915,23 @@ class _Plot(pg.PlotWidget):
             self.view_boxes[index].setXLink(self.viewbox)
             if self.signals[index].individual_axis:
                 self.axes[index].show()
+
+            if id(sig.timestamps) not in self._timebase_db:
+                self._timebase_db[id(sig.timestamps)] = {uuid}
+                self._compute_all_timebase()
+            else:
+                self._timebase_db[id(sig.timestamps)].add(uuid)
         else:
             self.signals[index].enable = False
             self.curves[index].hide()
             self.view_boxes[index].setXLink(None)
             self.axes[index].hide()
+
+            self._timebase_db[id(sig.timestamps)].remove(uuid)
+
+            if len(self._timebase_db[id(sig.timestamps)]) == 0:
+                del self._timebase_db[id(sig.timestamps)]
+                self._compute_all_timebase()
 
         if self.cursor1:
             self.cursor_move_finished.emit()
@@ -1160,11 +1204,23 @@ class _Plot(pg.PlotWidget):
                     self.cursor1.setPos((start + stop) / 2)
                     self.cursor_move_finished.emit()
 
+                    if self.region is not None:
+                        self.cursor1.hide()
+
                 else:
                     self.plotItem.removeItem(self.cursor1)
                     self.cursor1.setParent(None)
                     self.cursor1 = None
                     self.cursor_removed.emit()
+
+            elif key == QtCore.Qt.Key_Y and modifier == QtCore.Qt.NoModifier:
+                if self.region is not None:
+                    if self.region_lock is not None:
+                        self.region_lock = None
+                    else:
+                        self.region_lock = self.region.getRegion()[0]
+                else:
+                    self.region_lock = None
 
             elif key == QtCore.Qt.Key_F and modifier == QtCore.Qt.NoModifier:
                 if self.common_axis_items:
@@ -1260,11 +1316,18 @@ class _Plot(pg.PlotWidget):
                     )
                     self.region.setRegion((start, stop))
 
+                    if self.cursor1 is not None:
+                        self.cursor1.hide()
+
                 else:
+                    self.region_lock = None
                     self.region.setParent(None)
                     self.region.hide()
                     self.region = None
                     self.range_removed.emit()
+
+                    if self.cursor1 is not None:
+                        self.cursor1.show()
 
             elif key == QtCore.Qt.Key_S and modifier == QtCore.Qt.ControlModifier:
                 file_name, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -1275,9 +1338,31 @@ class _Plot(pg.PlotWidget):
                 )
 
                 if file_name:
-                    with MDF() as mdf:
-                        mdf.append(self.signals)
-                        mdf.save(file_name, overwrite=True)
+                    signals = [
+                        signal
+                        for signal in self.signals
+                        if signal.enable
+                    ]
+                    if signals:
+                        with MDF() as mdf:
+                            groups = {}
+                            for sig in signals:
+                                id_ = id(sig.timestamps)
+                                if id_ not in groups:
+                                    groups[id_] = []
+                                groups[id_].append(sig)
+
+                            for signals in groups.values():
+                                sigs = []
+                                for signal in signals:
+                                    if ':' in signal.name:
+                                        sig = signal.copy()
+                                        sig.name = sig.name.split(':')[-1].strip()
+                                        sigs.append(sig)
+                                    else:
+                                        sigs.append(signal)
+                                mdf.append(sigs, common_timebase=True)
+                            mdf.save(file_name, overwrite=True)
 
             elif key == QtCore.Qt.Key_S and modifier == QtCore.Qt.NoModifier:
 
@@ -1299,7 +1384,7 @@ class _Plot(pg.PlotWidget):
                 )
 
                 if any(
-                    sig.min != "n.a." and curve.isVisible()
+                    sig.min != "n.a." and curve.isVisible() and sig.uuid in self.common_axis_items
                     for (sig, curve) in zip(self.signals, self.curves)
                 ):
                     count += 1
@@ -1308,6 +1393,7 @@ class _Plot(pg.PlotWidget):
                     with_common_axis = False
 
                 if count:
+
                     position = 0
                     for uuid in uuids:
                         signal, index = self.signal_by_uuid(uuid)
@@ -1364,7 +1450,9 @@ class _Plot(pg.PlotWidget):
 
                             dim = (float(max_) - min_) * 1.1
 
-                            max_ = min_ + dim * count
+                            max_ = min_ + dim * count - 0.05 * dim
+                            min_ = min_ - 0.05 * dim
+
                             min_, max_ = (
                                 min_ - dim * position,
                                 max_ - dim * position,
@@ -1421,18 +1509,11 @@ class _Plot(pg.PlotWidget):
                     self.cursor1.set_value(pos)
 
             elif key == QtCore.Qt.Key_H and modifier == QtCore.Qt.NoModifier:
-                start_ts = [
-                    sig.timestamps[0] for sig in self.signals if len(sig.timestamps)
-                ]
+                if len(self.all_timebase):
+                    start_ts = np.amin(self.all_timebase)
+                    stop_ts = np.amax(self.all_timebase)
 
-                stop_ts = [
-                    sig.timestamps[-1] for sig in self.signals if len(sig.timestamps)
-                ]
-
-                if start_ts:
-                    start_t, stop_t = min(start_ts), max(stop_ts)
-
-                    self.viewbox.setXRange(start_t, stop_t)
+                    self.viewbox.setXRange(start_ts, stop_ts)
                     event_ = QtGui.QKeyEvent(
                         QtCore.QEvent.KeyPress, QtCore.Qt.Key_F, QtCore.Qt.NoModifier
                     )
@@ -1456,6 +1537,8 @@ class _Plot(pg.PlotWidget):
                 self.parent().keyPressEvent(event)
 
     def trim(self):
+        if not self._can_trim:
+            return
         (start, stop), _ = self.viewbox.viewRange()
 
         width = self.width() - self.axis.width()
@@ -1596,35 +1679,41 @@ class _Plot(pg.PlotWidget):
         self.current_uuid = uuid
 
     def _clicked(self, event):
+        modifiers = QtGui.QApplication.keyboardModifiers()
+
         if QtCore.Qt.Key_C not in self.disabled_keys:
-            x = self.plot_item.vb.mapSceneToView(event.scenePos())
 
-            if self.cursor1 is not None:
-                self.plotItem.removeItem(self.cursor1)
-                self.cursor1.setParent(None)
-                self.cursor1 = None
+            if self.region is None:
+                pos = self.plot_item.vb.mapSceneToView(event.scenePos())
 
-            self.cursor1 = Cursor(pos=x, angle=90, movable=True)
-            self.plotItem.addItem(self.cursor1, ignoreBounds=True)
-            self.cursor1.sigPositionChanged.connect(self.cursor_moved.emit)
-            self.cursor1.sigPositionChangeFinished.connect(
-                self.cursor_move_finished.emit
-            )
-            self.cursor_move_finished.emit()
+                if self.cursor1 is not None:
+                    self.plotItem.removeItem(self.cursor1)
+                    self.cursor1.setParent(None)
+                    self.cursor1 = None
+
+                self.cursor1 = Cursor(pos=pos, angle=90, movable=True)
+                self.plotItem.addItem(self.cursor1, ignoreBounds=True)
+                self.cursor1.sigPositionChanged.connect(self.cursor_moved.emit)
+                self.cursor1.sigPositionChangeFinished.connect(
+                    self.cursor_move_finished.emit
+                )
+                self.cursor_move_finished.emit()
+
+            else:
+                pos = self.plot_item.vb.mapSceneToView(event.scenePos())
+                start, stop = self.region.getRegion()
+
+                if self.region_lock is not None:
+                    self.region.setRegion((self.region_lock, pos.x()))
+                else:
+                    if modifiers == QtCore.Qt.ControlModifier:
+                        self.region.setRegion((start, pos.x()))
+                    else:
+                        self.region.setRegion((pos.x(), stop))
 
     def add_new_channels(self, channels, computed=False):
         geometry = self.viewbox.sceneBoundingRect()
         initial_index = len(self.signals)
-
-        if initial_index == 0 and channels:
-            start_ts = [sig.timestamps[0] for sig in channels if len(sig.timestamps)]
-
-            stop_ts = [sig.timestamps[-1] for sig in channels if len(sig.timestamps)]
-
-            if start_ts:
-                start_t, stop_t = min(start_ts), max(stop_ts)
-
-                self.viewbox.setXRange(start_t, stop_t)
 
         for i, sig in enumerate(channels):
             index = len(self.signals)
@@ -1666,7 +1755,10 @@ class _Plot(pg.PlotWidget):
                 "fmt": "",
             }
 
-            color = COLORS[index % 10]
+            if hasattr(sig, 'color'):
+                color = sig.color or COLORS[index % 10]
+            else:
+                color = COLORS[index % 10]
             sig.color = color
 
             if len(sig.samples):
@@ -1744,26 +1836,31 @@ class _Plot(pg.PlotWidget):
             axis.hide()
             view_box.addItem(curve)
 
+            if id(sig.timestamps) not in self._timebase_db:
+                self._timebase_db[id(sig.timestamps)] = set()
+            self._timebase_db[id(sig.timestamps)].add(sig.uuid)
+
         self.trim()
         self.update_lines(force=True)
 
         for curve in self.curves[initial_index:]:
             curve.show()
 
+        self._compute_all_timebase()
+
         if initial_index == 0 and self.signals:
             self.set_current_uuid(self.signals[0].uuid)
 
-        if self.signals:
-            ids = {id(s.timestamps): s.timestamps for s in self.signals}
+            if len(self.all_timebase):
+                start_t, stop_t = np.amin(self.all_timebase), np.amax(self.all_timebase)
+                self.viewbox.setXRange(start_t, stop_t)
 
-            #            self.all_timebase = self.timebase = np.unique(
-            #                np.concatenate([v for v in ids.values()])
-            #            )
-            self.all_timebase = self.timebase = np.unique(
-                reduce(np.union1d, [v for v in ids.values()])
-            )
+    def _compute_all_timebase(self):
+        if self._timebase_db:
+            timebases = [sig.timestamps for sig in self.signals if id(sig.timestamps) in self._timebase_db]
+            self.all_timebase = self.timebase = reduce(np.union1d, timebases)
         else:
-            self.all_timebase = self.timebase = None
+            self.all_timebase = self.timebase = []
 
     def signal_by_uuid(self, uuid):
         for i, sig in enumerate(self.signals):
@@ -1799,6 +1896,8 @@ class _Plot(pg.PlotWidget):
 
     def delete_channels(self, deleted):
 
+        needs_timebase_compute = False
+
         indexes = sorted(
             [(self.signal_by_uuid(uuid)[1], uuid) for uuid in deleted], reverse=True,
         )
@@ -1821,6 +1920,13 @@ class _Plot(pg.PlotWidget):
             if uuid in self.common_axis_items:
                 self.common_axis_items.remove(uuid)
 
+            if sig.enable:
+                self._timebase_db[id(sig.timestamps)].remove(sig.uuid)
+
+                if len(self._timebase_db[id(sig.timestamps)]) == 0:
+                    del self._timebase_db[id(sig.timestamps)]
+                    needs_timebase_compute = True
+
         uuids = [sig.uuid for sig in self.signals]
 
         if uuids:
@@ -1830,3 +1936,49 @@ class _Plot(pg.PlotWidget):
                 self.set_current_uuid(uuids[0], True)
         else:
             self.current_uuid = None
+
+        if needs_timebase_compute:
+            self._compute_all_timebase()
+
+    def set_time_offset(self, info):
+        absolute, offset, *uuids = info
+        signals = [
+            sig
+            for sig in self.signals
+            if sig.uuid in uuids
+        ]
+
+        if absolute:
+            for sig in signals:
+                if not len(sig.timestamps):
+                    continue
+                id_ = id(sig.timestamps)
+                delta = sig.timestamps[0] - offset
+                sig.timestamps = sig.timestamps - delta
+
+                if id(sig.timestamps) not in self._timebase_db:
+                    self._timebase_db[id(sig.timestamps)] = set()
+                self._timebase_db[id(sig.timestamps)].add(sig.uuid)
+
+                self._timebase_db[id_].remove(sig.uuid)
+                if len(self._timebase_db[id_]) == 0:
+                    del self._timebase_db[id_]
+        else:
+            for sig in signals:
+                if not len(sig.timestamps):
+                    continue
+                id_ = id(sig.timestamps)
+
+                sig.timestamps = sig.timestamps + offset
+
+                if id(sig.timestamps) not in self._timebase_db:
+                    self._timebase_db[id(sig.timestamps)] = set()
+                self._timebase_db[id(sig.timestamps)].add(sig.uuid)
+
+                self._timebase_db[id_].remove(sig.uuid)
+                if len(self._timebase_db[id_]) == 0:
+                    del self._timebase_db[id_]
+
+        self._compute_all_timebase()
+
+        self.xrange_changed_handle()

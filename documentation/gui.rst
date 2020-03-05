@@ -25,6 +25,7 @@ GUI
 With the GUI tool you can
 
 * visualize channels
+* compare channels from multiple files in the same plot
 * see channel, conversion and source metadata as stored in the MDF file
 * access library functionality for single files (convert, export, cut, filter, resample, scramble) and multiple files (concatenate, stack)
 
@@ -52,6 +53,7 @@ Mode
 
 * *Single files* : files are opened idividually
 * *Batch processing* : allows processing multiple files 
+* *Comparison* : show channels from all the opened files, in a single Plot 
 
 .. image:: images/open_files.gif
 
@@ -94,38 +96,34 @@ Plot
 
 There are several keyboard shortcuts for handling the plots:
 
-============ ================== ================================================================================================================
-Shortcut     Action             Desctiption
-============ ================== ================================================================================================================
-C            Cursor             Displays a movable cursor that will trigger the display of the current value for all plot channels
-F            Fit                Y-axis fit all active channels on the screen, keeping the current X-axis range
-G            Grid               Toggle grid lines
-H            Home               XY-axis fit all active channels
-I            Zoom-in            X-axis zoom-in [1]_
-O            Zoom-out           X-axis zoom-out [1]_
-M            Statistics         Toggle the display of the statistic panel
-R            Range              Display a movable range that will trigger the display of the delta values for all plot channels
-S            Stack              Y Stack all active channels so that they don't overlap, keeping the X-axis range
-.            Toggle dots        toogle the display of signal samples (using dots affects performance)
-←            Move cursor left   Moves the cursor to the next sample on the left
-→            Move cursor right  Moves the cursor to the next sample on the right
-Ins          Insert computation Insert new channel in the plot using functions and operations
-Ctrl+B       Bin                Toggle binary representation of integer channels
-Ctrl+H       Hex                Toggle hex representation of integer channels
-Ctrl+P       Physical           Toggle physical representation of integer channels
-Ctrl+S       Save plot channels Save channels from current active subplot in a new MF4 file
-Ctrl+Shift+S Save all channels  Save all channels from all sub-plots in a new MF4 file
+============ ====================== ================================================================================================================
+Shortcut     Action                 Desctiption
+============ ====================== ================================================================================================================
+C            Cursor                 Displays a movable cursor that will trigger the display of the current value for all plot channels
+F            Fit                    Y-axis fit all active channels on the screen, keeping the current X-axis range
+G            Grid                   Toggle grid lines
+H            Home                   XY-axis fit all active channels
+I            Zoom-in                X-axis zoom-in [1]_
+O            Zoom-out               X-axis zoom-out [1]_
+M            Statistics             Toggle the display of the statistic panel
+R            Range                  Display a movable range that will trigger the display of the delta values for all plot channels [2]_
+S            Stack                  Y Stack all active channels so that they don't overlap, keeping the X-axis range
+Y            Lock/unlock region     Lock or unlock the left margin of the region
+.            Toggle dots            toogle the display of signal samples (using dots affects performance)
+←            Move cursor left       Moves the cursor to the next sample on the left
+→            Move cursor right      Moves the cursor to the next sample on the right
+Ins          Insert computation     Insert new channel in the plot using functions and operations
+Ctrl+B       Bin                    Toggle binary representation of integer channels
+Ctrl+H       Hex                    Toggle hex representation of integer channels
+Ctrl+P       Physical               Toggle physical representation of integer channels
+Ctrl+S       Save plot channels     Save channels from current active subplot in a new MF4 file
+Ctrl+Shift+S Save all channels      Save all channels from all sub-plots in a new MF4 file
 Shift+C      Cascade sub-plots  
-Shift+T      Tile sub-plots     Tiles sub-plots in a grid
-Shift+V      Tile vertically    Tiles sub-plots vertically [2]_
-Shift+H      Tile horizontally  Tiles sub-plots horizontally [2]_
-============ ================== ================================================================================================================
+Shift+T      Tile sub-plots         Tiles sub-plots in a grid
+Shift+V      Tile vertically        Tiles sub-plots vertically [3]_
+Shift+H      Tile horizontally      Tiles sub-plots horizontally [3]_
+============ ====================== ================================================================================================================
 
-
-.. rubric:: Footnotes
-
-.. [1] If the cursor is present then zooming will center on it.
-.. [2] New in *asammdf 5.7.0*
 
 
 Single files
@@ -234,14 +232,10 @@ Each item has five elements
 1. display enable checkbox
 2. color select button
 3. channel name and unit label
-4. channel value label [3]_     
+4. channel value label [4]_     
 5. common axis checkbox
-6. individual axis checkbox [4]_
-    
-.. rubric:: Footnotes
-
-.. [3] the value is only displayed if the cursor or range are active. For the cursor is will show the current value, and for the range it will show the value delta between the range start and stop timestamps
-.. [4] New in *asammdf 5.7.0*
+6. individual axis checkbox [5]_
+   
 
 .. image:: images/individual_axis.gif
         
@@ -308,7 +302,18 @@ The *Multiple files* toolbox page is used to concatenate or stack multiple files
 The files list can be rearranged in the list (1) by drag and dropping lines. Unwanted files can be deleted by
 selecting them and pressing the *DEL* key. The files order is considered from top to bottom. 
 
+Comparison
+==========
+Use *CTRL+F* to search channels from all the opened files. The channel names are prefixed
+with the measurement index.
 
+.. rubric:: Footnotes
+
+.. [1] If the cursor is present then zooming will center on it.
+.. [2] Clicking the plot will move the left margin of the region. Pressing CTRL while clicking the plot will move the right margin of the region. 
+.. [3] New in *asammdf 5.7.0*
+.. [4] the value is only displayed if the cursor or range are active. For the cursor is will show the current value, and for the range it will show the value delta between the range start and stop timestamps
+.. [5] New in *asammdf 5.7.0*
 
 
 

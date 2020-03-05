@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import webbrowser
 import gc
+from textwrap import wrap
 
 from PyQt5 import QtGui
 from PyQt5 import QtWidgets
@@ -35,8 +36,34 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
 
         self.batch = BatchWidget(self.ignore_value2text_conversions)
         self.stackedWidget.addWidget(self.batch)
+
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        widget.setLayout(layout)
+
+        multi_search = QtWidgets.QPushButton('Search')
+        icon = QtGui.QIcon()
+        icon.addPixmap(QtGui.QPixmap(":/search.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        multi_search.setIcon(icon)
+        multi_search.clicked.connect(self.comparison_search)
+
+        multi_info = QtWidgets.QPushButton('Measurements information')
+        icon = QtGui.QIcon()
+        icon.addPixmap(QtGui.QPixmap(":/info.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        multi_info.setIcon(icon)
+        multi_info.clicked.connect(self.comparison_info)
+
+        hbox = QtWidgets.QHBoxLayout()
+        hbox.addWidget(multi_search)
+        hbox.addWidget(multi_info)
+        hbox.addStretch()
+
         self.comparison_plot = Plot({}, parent=self)
-        self.stackedWidget.addWidget(self.comparison_plot)
+
+        layout.addLayout(hbox)
+        layout.addWidget(self.comparison_plot)
+
+        self.stackedWidget.addWidget(widget)
         self.stackedWidget.setCurrentIndex(0)
 
         self.progress = None
@@ -50,6 +77,7 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
         icon.addPixmap(QtGui.QPixmap(":/open.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         action = QtWidgets.QAction(icon, "Open", menu)
         action.triggered.connect(self.open)
+        action.setShortcut(QtGui.QKeySequence("Ctrl+O"))
         open_group.addAction(action)
         menu.addActions(open_group.actions())
         action = QtWidgets.QAction(icon, "Open folder", menu)
@@ -354,6 +382,15 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
         action.setShortcut(QtCore.Qt.Key_R)
         cursors_actions.addAction(action)
 
+        icon = QtGui.QIcon()
+        icon.addPixmap(
+            QtGui.QPixmap(":/lock_range.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off
+        )
+        action = QtWidgets.QAction(icon, "{: <20}\tY".format("Lock/unlock range"), menu)
+        action.triggered.connect(partial(self.plot_action, key=QtCore.Qt.Key_Y))
+        action.setShortcut(QtCore.Qt.Key_Y)
+        cursors_actions.addAction(action)
+
         self.plot_menu = QtWidgets.QMenu("Plot", self.menubar)
         self.plot_menu.addActions(plot_actions.actions())
         self.plot_menu.addSeparator()
@@ -412,7 +449,7 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
         for i in range(count):
             self.files.widget(i).set_line_style(with_dots=self.with_dots)
 
-        self.comparison_plot.update_lines(with_dots=self.with_dots)
+        self.comparison_plot.plot.update_lines(with_dots=self.with_dots)
 
     def show_sub_windows(self, mode):
 
@@ -676,12 +713,13 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
         file_names, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
             "Select measurement file",
-            "",
+            self._settings.value("last_opened_path", "", str),
             "MDF v3 (*.dat *.mdf);;MDF v4(*.mf4);;DL3/ERG files (*.dl3 *.erg);;All files (*.dat *.mdf *.mf4 *.dl3 *.erg)",
             "All files (*.dat *.mdf *.mf4 *.dl3 *.erg)",
         )
 
         if file_names:
+            self._settings.setValue("last_opened_path", file_names[0])
             gc.collect()
 
         for file_name in natsorted(file_names):
@@ -792,11 +830,12 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
                 channels_dbs = [
                     self.files.widget(i).mdf.channels_db for i in range(count)
                 ]
-                tooltips = [
-                    f'Search results for file\n "{self.files.widget(i).file_name}"'
+                measurements = [
+                    str(self.files.widget(i).mdf.name)
                     for i in range(count)
                 ]
-                dlg = MultiSearch(channels_dbs, tooltips, parent=self,)
+
+                dlg = MultiSearch(channels_dbs, measurements, parent=self,)
                 dlg.setModal(True)
                 dlg.exec_()
                 result = dlg.result
@@ -812,7 +851,9 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
                     for file_index in sorted(selections):
                         channels = selections[file_index]
                         signals = self.files.widget(file_index).mdf.select(
-                            channels, copy_master=False,
+                            channels,
+                            copy_master=False,
+                            ignore_value2text_conversions=self.ignore_value2text_conversions,
                         )
                         for sig, entry in zip(signals, channels):
                             sig.tooltip = f"{sig.name}\n@ {self.files.widget(file_index).file_name}"
@@ -825,3 +866,28 @@ class MainWindow(Ui_PyMDFMainWindow, QtWidgets.QMainWindow):
 
         else:
             super().keyPressEvent(event)
+
+    def comparison_search(self, event):
+        event = QtGui.QKeyEvent(
+            QtCore.QEvent.KeyPress, QtCore.Qt.Key_F, QtCore.Qt.ControlModifier
+        )
+        self.keyPressEvent(event)
+
+    def comparison_info(self, event):
+        count = self.files.count()
+        measurements = [
+            str(self.files.widget(i).mdf.name)
+            for i in range(count)
+        ]
+
+        info = []
+        for i, name in enumerate(measurements, 1):
+            info.extend(wrap(f'{i:> 2}: {name}', 120))
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Measurement files used for comparison",
+            '\n'.join(info),
+        )
+
+
