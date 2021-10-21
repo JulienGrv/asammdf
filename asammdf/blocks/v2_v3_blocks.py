@@ -1397,6 +1397,8 @@ class ChannelConversion(_ChannelConversionBase):
             for i in range(nr):
                 keys.append(f"param_val_{i}")
                 keys.append(f"text_{i}")
+        else:
+            keys = []
 
         max_len = max(len(key) for key in keys)
         template = f"{{: <{max_len}}}: {{}}"
@@ -1695,6 +1697,8 @@ address: {hex(self.address)}
         elif conv == v23c.CONVERSION_TYPE_TABX:
             nr = self.ref_param_nr
             fmt = v23c.FMT_CONVERSION_COMMON + "d32s" * nr
+        else:
+            fmt = None
 
         if conv == v23c.CONVERSION_TYPE_NONE:
             keys = v23c.KEYS_CONVERSION_NONE
@@ -1728,6 +1732,8 @@ address: {hex(self.address)}
             for i in range(nr):
                 keys.append(f"param_val_{i}")
                 keys.append(f"text_{i}")
+        else:
+            keys = []
 
         if self.block_len > v23c.MAX_UINT16:
             self.block_len = v23c.MAX_UINT16
@@ -1953,7 +1959,7 @@ class ChannelExtension:
                         self.reserved0,
                     ) = SOURCE_EXTRA_VECTOR_uf(kwargs["raw_bytes"], 6)
 
-                self.address = kwargs.get("address", 0)
+                self.address = address = kwargs.get("address", 0)
             except KeyError:
                 if kwargs.get("mapped", False):
                     self.address = address = kwargs["address"]

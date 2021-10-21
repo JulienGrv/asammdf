@@ -307,6 +307,8 @@ def extract_mux(
                 if sig.multiplex == "Multiplexor" and sig.muxer_for_signal is None:
                     multiplexor_name = sig.name
                     break
+            else:
+                multiplexor_name = None
             for sig in message:
                 if (
                     sig.multiplex not in (None, "Multiplexor")

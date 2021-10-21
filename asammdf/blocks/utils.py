@@ -154,7 +154,7 @@ def extract_cncomment_xml(comment: str) -> str:
                 for e in common_properties:
                     field = f'{e.get("name")}: {e.text}'
                     comment.append(field)
-                comment = "\n".join(field)
+                comment = "\n".join(comment)
             else:
                 comment = ""
         else:
@@ -320,7 +320,7 @@ def extract_display_names(comment: str) -> dict[str, str]:
 @lru_cache(maxsize=1024)
 def get_fmt_v3(
     data_type: int, size: int, byte_order: int = v3c.BYTE_ORDER_INTEL
-) -> str:
+) -> str | None:
     """convert mdf versions 2 and 3 channel data type to numpy dtype format
     string
 
@@ -399,6 +399,8 @@ def get_fmt_v3(
                     fmt = f"<f{size}"
                 else:
                     fmt = f">f{size}"
+            else:
+                fmt = None
 
     return fmt
 
@@ -406,7 +408,7 @@ def get_fmt_v3(
 @lru_cache(maxsize=1024)
 def get_fmt_v4(
     data_type: int, size: int, channel_type: int = v4c.CHANNEL_TYPE_VALUE
-) -> str:
+) -> str | None:
     """convert mdf version 4 channel data type to numpy dtype format string
 
     Parameters
@@ -424,6 +426,8 @@ def get_fmt_v4(
         numpy compatible data type format string
 
     """
+    fmt = None
+
     if data_type in v4c.NON_SCALAR_TYPES:
         size = size // 8
 
