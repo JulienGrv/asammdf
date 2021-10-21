@@ -25,6 +25,7 @@ try:
 except:
     evaluate3 = evaluate
 import numpy as np
+from numpy.typing import NDArray
 
 from . import v4_constants as v4c
 from ..version import __version__
@@ -3185,7 +3186,7 @@ class ChannelConversion(_ChannelConversionBase):
 
         return address
 
-    def convert(self, values):
+    def convert(self, values: NDArray[Any]) -> NDArray[Any]:
         conversion_type = self.conversion_type
         if conversion_type == v4c.CONVERSION_TYPE_NON:
             pass

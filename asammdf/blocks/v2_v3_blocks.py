@@ -20,6 +20,7 @@ try:
 except:
     evaluate3 = evaluate
 import numpy as np
+from numpy.typing import NDArray
 
 from . import v2_v3_constants as v23c
 from ..version import __version__
@@ -1455,7 +1456,7 @@ address: {hex(self.address)}
 
         return "\n".join(metadata)
 
-    def convert(self, values):
+    def convert(self, values: NDArray[Any]) -> NDArray[Any]:
         conversion_type = self.conversion_type
 
         if conversion_type == v23c.CONVERSION_TYPE_NONE:
