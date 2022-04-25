@@ -113,12 +113,12 @@ setup(
             "scipy<1.8.0",
         ],
         "encryption": ["cryptography", "keyring"],
-        "symbolic_math": "numexpr3",
+        "symbolic_math": "numexpr3 ; sys_platform != 'darwin'",
     },
     # If there are data files included in your packages that need to be
     # installed, specify them here.  If using Python 2.6 or less, then these
     # have to be included in MANIFEST.in as well.
-    package_data={"asammdf": ["asammdf/gui/ui/*.ui"]},
+    package_data={"asammdf": ["py.typed"]},
     include_package_data=True,
     # Although 'package_data' is the preferred approach, in some case you may
     # need to place data files outside of your packages. See:

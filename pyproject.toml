@@ -3,12 +3,48 @@ requires = ["numpy", "setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.black]
+target-version = ["py37", "py38", "py39", "py310"]
+required-version = "22"
 extend-exclude = '''
 ^/asammdf/gui/ui
 '''
 
+[tool.coverage.run]
+command_line = "--module pytest -c pyproject.toml"
+source = ["asammdf/"]
+omit = ["asammdf/gui/**"]
+
+[tool.coverage.report]
+fail_under = 53
+
 [tool.isort]
+py_version = "37"
 force_sort_within_sections = true
 order_by_type = false
 profile = "black"
 skip_glob = ["asammdf/gui/ui"]
+
+[tool.mypy]
+files = ["asammdf/"]
+exclude = ['^asammdf/gui/.*\.py$']
+python_version = "3.7"
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "canmatrix.*",
+    "cchardet.*",
+    "fastparquet.*",
+    "h5py.*",
+    "hdf5storage.*",
+    "lz4.*",
+    "matplotlib.*",
+    "numexpr.*",
+    "numexpr3.*",
+    "scipy.*",
+    "snappy.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["test/"]
