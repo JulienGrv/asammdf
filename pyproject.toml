@@ -103,6 +103,16 @@ archs = ["auto64"]                        # only build for 64bit architectures
 # skip pypy and irrelevant architectures
 skip = ["pp*", "*_ppc64le", "*-musllinux*", "*_s390x"]
 
+[tool.mypy]
+files = "src/asammdf"
+exclude = ["src/asammdf/gui/"]
+python_version = "3.9"
+plugins = ["numpy.typing.mypy_plugin"]
+
+[[tool.mypy.overrides]]
+module = "asammdf.gui.*"
+ignore_errors = true
+
 [tool.ruff]
 target-version = "py39"
 extend-exclude = ["./src/asammdf/gui/ui"]

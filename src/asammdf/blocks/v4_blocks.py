@@ -13,19 +13,22 @@ from struct import pack, unpack, unpack_from
 from textwrap import wrap
 import time
 from traceback import format_exc
-from typing import Any, TYPE_CHECKING
+import typing
+from typing import Any, SupportsBytes, TYPE_CHECKING
 from xml.dom import minidom
 import xml.etree.ElementTree as ET
 
 import dateutil.tz
 from numexpr import evaluate
 import numpy as np
+from typing_extensions import Buffer, Unpack
 
 from .. import tool
 from . import v4_constants as v4c
 from .cutils import bytes_dtype_size
 from .utils import (
     block_fields,
+    BlockKwargs,
     escape_xml_string,
     extract_display_names,
     extract_ev_tool,
@@ -159,7 +162,7 @@ class AttachmentBlock:
         "reserved1",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         self.file_name = self.mime = self.comment = ""
 
         try:
@@ -167,7 +170,7 @@ class AttachmentBlock:
             stream = kwargs["stream"]
             mapped = kwargs.get("mapped", False) or not is_file_like(stream)
 
-            if mapped:
+            if isinstance(stream, Buffer):
                 (
                     self.id,
                     self.reserved0,
@@ -187,7 +190,8 @@ class AttachmentBlock:
 
                 address += v4c.AT_COMMON_SIZE
 
-                self.embedded_data = stream[address : address + self.embedded_size]
+                with memoryview(stream) as view:
+                    self.embedded_data = view[address : address + self.embedded_size]
             else:
                 stream.seek(address)
 
@@ -290,7 +294,7 @@ class AttachmentBlock:
             logger.warning("external attachments not supported")
             return b""
 
-    def to_blocks(self, address: int, blocks: list[Any], defined_texts: dict[str, int]) -> int:
+    def to_blocks(self, address: int, blocks: list[SupportsBytes], defined_texts: dict[str, int]) -> int:
         text = self.file_name
         if text:
             if text in defined_texts:
@@ -497,7 +501,7 @@ class Channel:
         "upper_limit",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         if "stream" in kwargs:
             self.address = address = kwargs["address"]
             self.dtype_fmt = self.attachment = None
@@ -578,7 +582,7 @@ class Channel:
                     block = stream.read(self.block_len - COMMON_SIZE)
                     links_nr = self.links_nr
 
-                    links = unpack_from(f"<{links_nr}Q", block)
+                    links: tuple[int, ...] = unpack_from(f"<{links_nr}Q", block)
                     params = unpack_from(v4c.FMT_CHANNEL_PARAMS, block, links_nr * 8)
 
                     (
@@ -1027,8 +1031,8 @@ class Channel:
     def to_blocks(
         self,
         address: int,
-        blocks: list[Any],
-        defined_texts: dict[str, int],
+        blocks: list[SupportsBytes],
+        defined_texts: dict[str | bytes, int],
         cc_map: dict[bytes, int],
         si_map: dict[bytes, int],
     ) -> int:
@@ -1403,7 +1407,7 @@ class ChannelArrayBlock(_ChannelArrayBlockBase):
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         self.axis_channels = []
         self.dynamic_size_channels = []
         self.input_quantity_channels = []
@@ -1788,6 +1792,24 @@ class ChannelArrayBlock(_ChannelArrayBlockBase):
         return factors
 
 
+class ChannelGroupKwargs(BlockKwargs, total=False):
+    reserved0: int
+    next_cg_addr: int
+    first_ch_addr: int
+    acq_name_addr: int
+    acq_source_addr: int
+    first_sample_reduction_addr: int
+    comment_addr: int
+    record_id: int
+    cycles_nr: int
+    flags: int
+    path_separator: int
+    reserved1: int
+    samples_byte_nr: int
+    invalidation_bytes_nr: int
+    cg_master_addr: int
+
+
 class ChannelGroup:
     """*ChannelGroup* has the following attributes, that are also available as
     dict like key-value pairs
@@ -1854,7 +1876,7 @@ class ChannelGroup:
         "samples_byte_nr",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[ChannelGroupKwargs]) -> None:
         self.acq_name = self.comment = ""
         self.acq_source = None
         self.cg_master_index = None
@@ -2016,8 +2038,8 @@ class ChannelGroup:
     def to_blocks(
         self,
         address: int,
-        blocks: list[Any],
-        defined_texts: dict[str, int],
+        blocks: list[SupportsBytes],
+        defined_texts: dict[str | bytes, int],
         si_map: dict[bytes, int],
     ) -> int:
         text = self.acq_name
@@ -2216,6 +2238,31 @@ class _ChannelConversionBase:
     )
 
 
+class _ChannelConversionKwargs(BlockKwargs, total=False):
+    raw_bytes: bytes
+    name: str
+    unit: str
+    comment: str
+    formula: str
+    links_nr: int
+    name_addr: int
+    unit_addr: int
+    comment_addr: int
+    inv_conv_addr: int
+    formula_addr: int
+    conversion_type: int
+    precision: int
+    flags: int
+    ref_param_nr: int
+    val_param_nr: int
+    min_phy_value: float
+    max_phy_value: float
+    a: float
+    b: float
+    default: int
+    tx_map: dict[int, str | bytes]
+
+
 class ChannelConversion(_ChannelConversionBase):
     """*ChannelConversion* has the following attributes, that are also available as
     dict like key-value pairs
@@ -2315,7 +2362,7 @@ class ChannelConversion(_ChannelConversionBase):
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[_ChannelConversionKwargs]) -> None:
         self._cache = None
         self.is_user_defined = False
 
@@ -2401,7 +2448,7 @@ class ChannelConversion(_ChannelConversionBase):
                     self.P4,
                     self.P5,
                     self.P6,
-                ) = unpack(v4c.FMT_CONVERSION_RAT_INIT, block)
+                ) = typing.cast(v4c.ConversionRatInit, unpack(v4c.FMT_CONVERSION_RAT_INIT, block))
 
             elif conv == v4c.CONVERSION_TYPE_ALG:
                 (
@@ -2417,7 +2464,7 @@ class ChannelConversion(_ChannelConversionBase):
                     self.val_param_nr,
                     self.min_phy_value,
                     self.max_phy_value,
-                ) = unpack(v4c.FMT_CONVERSION_ALGEBRAIC_INIT, block)
+                ) = typing.cast(v4c.ConversionAlgebraicInit, unpack(v4c.FMT_CONVERSION_ALGEBRAIC_INIT, block))
 
             elif conv in (v4c.CONVERSION_TYPE_TABI, v4c.CONVERSION_TYPE_TAB):
                 (
@@ -2432,10 +2479,10 @@ class ChannelConversion(_ChannelConversionBase):
                     self.val_param_nr,
                     self.min_phy_value,
                     self.max_phy_value,
-                ) = unpack_from(v4c.FMT_CONVERSION_NONE_INIT, block)
+                ) = v4c.CONVERSION_NONE_INIT_uf(block, 0)
 
                 nr = self.val_param_nr
-                values = unpack_from(f"<{nr}d", block, 56)
+                values: tuple[int, ...] = unpack_from(f"<{nr}d", block, 56)
                 for i in range(nr // 2):
                     self[f"raw_{i}"], self[f"phys_{i}"] = (
                         values[i * 2],
@@ -2455,7 +2502,7 @@ class ChannelConversion(_ChannelConversionBase):
                     self.val_param_nr,
                     self.min_phy_value,
                     self.max_phy_value,
-                ) = unpack_from(v4c.FMT_CONVERSION_NONE_INIT, block)
+                ) = v4c.CONVERSION_NONE_INIT_uf(block, 0)
                 nr = self.val_param_nr
                 values = unpack_from(f"<{nr}d", block, 56)
                 for i in range((nr - 1) // 3):
@@ -2472,11 +2519,11 @@ class ChannelConversion(_ChannelConversionBase):
                     self.unit_addr,
                     self.comment_addr,
                     self.inv_conv_addr,
-                ) = unpack_from("<4Q", block)
+                ) = typing.cast(tuple[int, int, int, int], unpack_from("<4Q", block))
 
                 links_nr = self.links_nr - 4
 
-                links = unpack_from(f"<{links_nr}Q", block, 32)
+                links: tuple[int, ...] = unpack_from(f"<{links_nr}Q", block, 32)
                 for i, link in enumerate(links[:-1]):
                     self[f"text_{i}"] = link
                 self.default_addr = links[-1]
@@ -2489,7 +2536,9 @@ class ChannelConversion(_ChannelConversionBase):
                     self.val_param_nr,
                     self.min_phy_value,
                     self.max_phy_value,
-                ) = unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                ) = typing.cast(
+                    tuple[int, int, int, int, int, float, float], unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                )
 
                 values = unpack_from(f"<{links_nr - 1}d", block, 32 + links_nr * 8 + 24)
                 for i, val in enumerate(values):
@@ -2501,7 +2550,7 @@ class ChannelConversion(_ChannelConversionBase):
                     self.unit_addr,
                     self.comment_addr,
                     self.inv_conv_addr,
-                ) = unpack_from("<4Q", block)
+                ) = typing.cast(tuple[int, int, int, int], unpack_from("<4Q", block))
 
                 links_nr = self.links_nr - 4
 
@@ -2518,7 +2567,9 @@ class ChannelConversion(_ChannelConversionBase):
                     self.val_param_nr,
                     self.min_phy_value,
                     self.max_phy_value,
-                ) = unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                ) = typing.cast(
+                    tuple[int, int, int, int, int, float, float], unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                )
 
                 values = unpack_from(f"<{self.val_param_nr}d", block, 32 + links_nr * 8 + 24)
                 self.default_lower = self.default_upper = 0
@@ -2533,7 +2584,7 @@ class ChannelConversion(_ChannelConversionBase):
                     self.unit_addr,
                     self.comment_addr,
                     self.inv_conv_addr,
-                ) = unpack_from("<4Q", block)
+                ) = typing.cast(tuple[int, int, int, int], unpack_from("<4Q", block))
 
                 links_nr = self.links_nr - 4
 
@@ -2549,7 +2600,9 @@ class ChannelConversion(_ChannelConversionBase):
                     self.val_param_nr,
                     self.min_phy_value,
                     self.max_phy_value,
-                ) = unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                ) = typing.cast(
+                    tuple[int, int, int, int, int, float, float], unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                )
 
                 values = unpack_from(f"<{self.val_param_nr}d", block, 32 + links_nr * 8 + 24)
                 for i, val in enumerate(values[:-1]):
@@ -2562,7 +2615,7 @@ class ChannelConversion(_ChannelConversionBase):
                     self.unit_addr,
                     self.comment_addr,
                     self.inv_conv_addr,
-                ) = unpack_from("<4Q", block)
+                ) = typing.cast(tuple[int, int, int, int], unpack_from("<4Q", block))
 
                 links_nr = self.links_nr - 4
 
@@ -2582,7 +2635,9 @@ class ChannelConversion(_ChannelConversionBase):
                     self.val_param_nr,
                     self.min_phy_value,
                     self.max_phy_value,
-                ) = unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                ) = typing.cast(
+                    tuple[int, int, int, int, int, float, float], unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                )
 
             elif conv == v4c.CONVERSION_TYPE_BITFIELD:
                 (
@@ -2590,7 +2645,7 @@ class ChannelConversion(_ChannelConversionBase):
                     self.unit_addr,
                     self.comment_addr,
                     self.inv_conv_addr,
-                ) = unpack_from("<4Q", block)
+                ) = typing.cast(tuple[int, int, int, int], unpack_from("<4Q", block))
 
                 links_nr = self.links_nr - 4
 
@@ -2606,7 +2661,9 @@ class ChannelConversion(_ChannelConversionBase):
                     self.val_param_nr,
                     self.min_phy_value,
                     self.max_phy_value,
-                ) = unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                ) = typing.cast(
+                    tuple[int, int, int, int, int, float, float], unpack_from("<2B3H2d", block, 32 + links_nr * 8)
+                )
 
                 values = unpack_from(f"<{self.val_param_nr}Q", block, 32 + links_nr * 8 + 24)
                 for i, val in enumerate(values):
@@ -3017,7 +3074,7 @@ class ChannelConversion(_ChannelConversionBase):
     def to_blocks(
         self,
         address: int,
-        blocks: list[Any],
+        blocks: list[SupportsBytes],
         defined_texts: dict[str, int],
         cc_map: dict[bytes, int],
     ) -> int:
@@ -4373,7 +4430,7 @@ class DataBlock:
 
     __slots__ = ("address", "block_len", "data", "id", "links_nr", "reserved0")
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         try:
             self.address = address = kwargs["address"]
             stream = kwargs["stream"]
@@ -4478,7 +4535,7 @@ class DataZippedBlock:
         "zip_type",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         self._prevent_data_setitem = True
         self._transposed = False
         try:
@@ -4665,7 +4722,7 @@ class DataGroup:
         "reserved1",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         self.comment = ""
 
         try:
@@ -4741,7 +4798,7 @@ class DataGroup:
 
         return dg
 
-    def to_blocks(self, address: int, blocks: list[Any], defined_texts: dict[str, int]) -> int:
+    def to_blocks(self, address: int, blocks: list[SupportsBytes], defined_texts: dict[str, int]) -> int:
         text = self.comment
         if text:
             if text in defined_texts:
@@ -4834,7 +4891,7 @@ class DataList(_DataListBase):
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         try:
             self.address = address = kwargs["address"]
             stream = kwargs["stream"]
@@ -5026,7 +5083,7 @@ class EventBlock(_EventBlockBase):
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         self.name = self.comment = self.group_name = ""
         self.scopes = []
         self.parent = None
@@ -5195,7 +5252,7 @@ class EventBlock(_EventBlockBase):
     def value(self, val) -> None:
         self.sync_factor = val / self.sync_base
 
-    def to_blocks(self, address: int, blocks: list[Any]) -> int:
+    def to_blocks(self, address: int, blocks: list[SupportsBytes]) -> int:
         text = self.name
         if text:
             tx_block = TextBlock(text=text)
@@ -5234,6 +5291,10 @@ class EventBlock(_EventBlockBase):
         return address
 
 
+class _FileIdentificationBlockKwargs(BlockKwargs):
+    version: str
+
+
 class FileIdentificationBlock:
     """
     *FileIdentificationBlock* has the following attributes, that are also available as
@@ -5268,7 +5329,7 @@ class FileIdentificationBlock:
         "version_str",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[_FileIdentificationBlockKwargs]) -> None:
         super().__init__()
 
         self.address = 0
@@ -5286,7 +5347,10 @@ class FileIdentificationBlock:
                 self.reserved1,
                 self.unfinalized_standard_flags,
                 self.unfinalized_custom_flags,
-            ) = unpack(v4c.FMT_IDENTIFICATION_BLOCK, stream.read(v4c.IDENTIFICATION_BLOCK_SIZE))
+            ) = typing.cast(
+                v4c.IdentificationBlock,
+                unpack(v4c.FMT_IDENTIFICATION_BLOCK, stream.read(v4c.IDENTIFICATION_BLOCK_SIZE)),
+            )
 
         except KeyError:
             version = kwargs.get("version", "4.00")
@@ -5356,7 +5420,7 @@ class FileHistory:
         "tz_offset",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         self.comment = ""
@@ -5404,7 +5468,7 @@ class FileHistory:
             localtz = dateutil.tz.tzlocal()
             self.time_stamp = datetime.fromtimestamp(time.time(), tz=localtz)
 
-    def to_blocks(self, address: int, blocks: list[Any], defined_texts: dict[str, int]) -> int:
+    def to_blocks(self, address: int, blocks: list[SupportsBytes], defined_texts: dict[str | bytes, int]) -> int:
         text = self.comment
         if text:
             if text in defined_texts:
@@ -5533,7 +5597,7 @@ class HeaderBlock:
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         self._common_properties = {}
@@ -5821,7 +5885,7 @@ class HeaderBlock:
 
         return start_time
 
-    def to_blocks(self, address: int, blocks: list[Any]) -> int:
+    def to_blocks(self, address: int, blocks: list[SupportsBytes]) -> int:
         blocks.append(self)
         self.address = address
         address += self.block_len
@@ -5874,7 +5938,7 @@ class HeaderList:
         "zip_type",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         try:
@@ -5935,6 +5999,12 @@ class _ListDataBase:
     )
 
 
+class ListDataKwargs(BlockKwargs, total=False):
+    data_block_nr: int
+    flags: int
+    data_block_len: int
+
+
 class ListData(_ListDataBase):
     """
     *ListData* has the following attributes, that are also available as
@@ -5988,7 +6058,7 @@ class ListData(_ListDataBase):
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[ListDataKwargs]) -> None:
         try:
             self.address = address = kwargs["address"]
             stream = kwargs["stream"]
@@ -6174,6 +6244,13 @@ class ListData(_ListDataBase):
         return result
 
 
+class _SourceInformationKwargs(BlockKwargs, total=False):
+    raw_bytes: bytes
+    tx_map: dict[int, str | bytes]
+    source_type: int
+    bus_type: int
+
+
 class SourceInformation:
     """
     *SourceInformation* has the following attributes, that are also available as
@@ -6221,7 +6298,7 @@ class SourceInformation:
         "source_type",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[_SourceInformationKwargs]) -> None:
         self.name = self.path = self.comment = ""
 
         if "stream" in kwargs:
@@ -6247,7 +6324,7 @@ class SourceInformation:
                 self.bus_type,
                 self.flags,
                 self.reserved1,
-            ) = unpack(v4c.FMT_SOURCE_INFORMATION, block)
+            ) = typing.cast(v4c.SourceInformation, unpack(v4c.FMT_SOURCE_INFORMATION, block))
 
             if self.id != b"##SI":
                 message = f'Expected "##SI" block @{hex(address)} but found "{self.id}"'
@@ -6355,7 +6432,7 @@ comment: {self.comment}
     def to_blocks(
         self,
         address: int,
-        blocks: list[Any],
+        blocks: list[SupportsBytes],
         defined_texts: dict[str, int],
         si_map: dict[bytes, int],
     ) -> int:
@@ -6493,7 +6570,7 @@ class TextBlock:
 
     __slots__ = ("address", "block_len", "id", "links_nr", "reserved0", "text")
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         if "safe" in kwargs:
             self.address = 0
             text = kwargs["text"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import bz2
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from copy import deepcopy
 import csv
 from datetime import datetime, timezone
@@ -21,12 +21,13 @@ import sys
 from tempfile import gettempdir, mkdtemp
 from traceback import format_exc
 from types import TracebackType
-from typing import Any, overload
+import typing
+from typing import Any, BinaryIO, Optional, overload, Union
 from warnings import warn
 import xml.etree.ElementTree as ET
 import zipfile
 
-from canmatrix import CanMatrix
+from canmatrix import CanMatrix, Frame
 import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
@@ -44,6 +45,7 @@ from .blocks.utils import (
     csv_bytearray2hex,
     csv_int2hex,
     downcast,
+    FileLike,
     is_file_like,
     load_can_database,
     master_using_raster,
@@ -80,11 +82,8 @@ from .types import (
     DbcFileType,
     EmptyChannelsType,
     FloatInterpolationModeType,
-    InputType,
     IntInterpolationModeType,
-    MDF_v2_v3_v4,
     RasterType,
-    ReadableBufferType,
     StrOrBytesPathType,
     StrPathType,
 )
@@ -112,9 +111,10 @@ class SearchMode(Enum):
     wildcard = "wildcard"
 
 
-def get_measurement_timestamp_and_version(
-    mdf: ReadableBufferType,
-) -> tuple[datetime, str]:
+Version = Union[mdf_v4.Version, mdf_v3.Version]
+
+
+def get_measurement_timestamp_and_version(mdf: FileLike | BinaryIO) -> tuple[datetime, Version]:
     id_block = FileIdentificationBlock(address=0, stream=mdf)
 
     version = id_block.mdf_version
@@ -213,12 +213,12 @@ class MDF:
 
     def __init__(
         self,
-        name: InputType | None = None,
-        version: str = "4.10",
+        name: StrPathType | FileLike | None = None,
+        version: Version = "4.10",
         channels: list[str] | None = None,
         **kwargs,
     ) -> None:
-        self._mdf = None
+        self._mdf: mdf_v2.MDF2 | mdf_v3.MDF3 | mdf_v4.MDF4
 
         if "callback" in kwargs:
             kwargs["progress"] = kwargs["callback"]
@@ -339,7 +339,7 @@ class MDF:
         else:
             kwargs["original_name"] = None
             kwargs["__internal__"] = True
-            version = validate_version_argument(version)
+            version = validate_version_argument(version, mdf_v4.MDF4.default_version)
             if version in MDF2_VERSIONS:
                 self._mdf = mdf_v2.MDF2(version=version, **kwargs)
             elif version in MDF3_VERSIONS:
@@ -378,41 +378,36 @@ class MDF:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool | None:
-        if self._mdf is not None:
-            try:
-                self.close()
-            except:
-                print(format_exc())
-
-        self._mdf = None
+        try:
+            self._mdf.close()
+        except:
+            print(format_exc())
 
     def __del__(self) -> None:
-        if self._mdf is not None:
-            try:
-                self.close()
-            except:
-                pass
-        self._mdf = None
+        try:
+            self._mdf.close()
+        except:
+            pass
 
     def __lt__(self, other: MDF) -> bool:
-        if self.header.start_time < other.header.start_time:
+        if self._mdf.header.start_time < other._mdf.header.start_time:
             return True
-        elif self.header.start_time > other.header.start_time:
+        elif self._mdf.header.start_time > other._mdf.header.start_time:
             return False
         else:
             t_min = []
-            for i, group in enumerate(self.groups):
+            for i, group in enumerate(self._mdf.groups):
                 cycles_nr = group.channel_group.cycles_nr
-                if cycles_nr and i in self.masters_db:
-                    master_min = self.get_master(i, record_offset=0, record_count=1)
+                if cycles_nr and i in self._mdf.masters_db:
+                    master_min = self._mdf.get_master(i, record_offset=0, record_count=1)
                     if len(master_min):
                         t_min.append(master_min[0])
 
             other_t_min = []
-            for i, group in enumerate(other.groups):
+            for i, group in enumerate(other._mdf.groups):
                 cycles_nr = group.channel_group.cycles_nr
-                if cycles_nr and i in other.masters_db:
-                    master_min = other.get_master(i, record_offset=0, record_count=1)
+                if cycles_nr and i in other._mdf.masters_db:
+                    master_min = other._mdf.get_master(i, record_offset=0, record_count=1)
                     if len(master_min):
                         other_t_min.append(master_min[0])
 
@@ -433,22 +428,22 @@ class MDF:
                 else:
                     return event.scopes
 
-        if other.version >= "4.00":
-            for event in other.events:
-                if self.version >= "4.00":
+        if isinstance(other._mdf, mdf_v4.MDF4):
+            for event in other._mdf.events:
+                if isinstance(self._mdf, mdf_v4.MDF4):
                     new_event = deepcopy(event)
                     event_valid = True
                     for i, ref in enumerate(new_event.scopes):
                         try:
                             dg_cntr, ch_cntr = ref
                             try:
-                                self.groups[dg_cntr].channels[ch_cntr]
+                                self._mdf.groups[dg_cntr].channels[ch_cntr]
                             except:
                                 event_valid = False
                         except TypeError:
                             dg_cntr = ref
                             try:
-                                self.groups[dg_cntr]
+                                self._mdf.groups[dg_cntr]
                             except:
                                 event_valid = False
                     # ignore attachments for now
@@ -456,7 +451,7 @@ class MDF:
                         key = f"attachment_{i}_addr"
                         event[key] = 0
                     if event_valid:
-                        self.events.append(new_event)
+                        self._mdf.events.append(new_event)
                 else:
                     ev_type = event.event_type
                     ev_range = event.range_type
@@ -513,24 +508,24 @@ class MDF:
                     else:
                         comment += "marker"
 
-                    scopes = get_scopes(event, other.events)
+                    scopes = get_scopes(event, other._mdf.events)
                     if scopes:
                         for i, ref in enumerate(scopes):
                             event_valid = True
                             try:
                                 dg_cntr, ch_cntr = ref
                                 try:
-                                    (self.groups[dg_cntr])
+                                    (self._mdf.groups[dg_cntr])
                                 except:
                                     event_valid = False
                             except TypeError:
                                 dg_cntr = ref
                                 try:
-                                    (self.groups[dg_cntr])
+                                    (self._mdf.groups[dg_cntr])
                                 except:
                                     event_valid = False
                             if event_valid:
-                                self.add_trigger(
+                                self._mdf.add_trigger(
                                     dg_cntr,
                                     timestamp,
                                     pre_time=pre,
@@ -538,8 +533,8 @@ class MDF:
                                     comment=comment,
                                 )
                     else:
-                        for i, _ in enumerate(self.groups):
-                            self.add_trigger(
+                        for i, _ in enumerate(self._mdf.groups):
+                            self._mdf.add_trigger(
                                 i,
                                 timestamp,
                                 pre_time=pre,
@@ -548,13 +543,13 @@ class MDF:
                             )
 
         else:
-            for trigger_info in other.iter_get_triggers():
+            for trigger_info in other._mdf.iter_get_triggers():
                 comment = trigger_info["comment"]
                 timestamp = trigger_info["time"]
                 group = trigger_info["group"]
 
-                if self.version < "4.00":
-                    self.add_trigger(
+                if isinstance(self._mdf, (mdf_v2.MDF2, mdf_v3.MDF3)):
+                    self._mdf.add_trigger(
                         group,
                         timestamp,
                         pre_time=trigger_info["pre_time"],
@@ -574,15 +569,15 @@ class MDF:
                     )
                     event.comment = comment
                     event.scopes.append(group)
-                    self.events.append(event)
+                    self._mdf.events.append(event)
 
     def _transfer_header_data(self, other: MDF, message: str = "") -> None:
-        self.header.author = other.header.author
-        self.header.department = other.header.department
-        self.header.project = other.header.project
-        self.header.subject = other.header.subject
-        self.header.comment = other.header.comment
-        if self.version >= "4.00" and message:
+        self._mdf.header.author = other._mdf.header.author
+        self._mdf.header.department = other._mdf.header.department
+        self._mdf.header.project = other._mdf.header.project
+        self._mdf.header.subject = other._mdf.header.subject
+        self._mdf.header.comment = other._mdf.header.comment
+        if isinstance(self._mdf, mdf_v4.MDF4) and message:
             fh = FileHistory()
             fh.comment = f"""<FHcomment>
     <TX>{message}</TX>
@@ -612,7 +607,7 @@ class MDF:
 
     def __contains__(self, channel: str) -> bool:
         """if *'channel name'* in *'mdf file'*"""
-        return channel in self.channels_db
+        return channel in self._mdf.channels_db
 
     def __iter__(self) -> Iterator[Signal]:
         """iterate over all the channels found in the file; master channels
@@ -624,7 +619,7 @@ class MDF:
     def configure(
         self,
         *,
-        from_other: MDF_v2_v3_v4 | None = None,
+        from_other: MDF | None = None,
         read_fragment_size: int | None = None,
         write_fragment_size: int | None = None,
         use_display_names: bool | None = None,
@@ -752,7 +747,7 @@ class MDF:
         if raise_on_multiple_occurrences is not None:
             self._raise_on_multiple_occurrences = bool(raise_on_multiple_occurrences)
 
-    def convert(self, version: str, progress=None) -> MDF:
+    def convert(self, version: Version, progress=None) -> MDF | object:
         """convert *MDF* to other version
 
         Parameters
@@ -767,15 +762,15 @@ class MDF:
             new *MDF* object
 
         """
-        version = validate_version_argument(version)
+        version = validate_version_argument(version, self._mdf.default_version)
 
-        out = MDF(version=version, **self._kwargs)
+        out = MDF(version=version, **self._mdf._kwargs)
 
         out.configure(from_other=self)
 
-        out.header.start_time = self.header.start_time
+        out._mdf.header.start_time = self._mdf.header.start_time
 
-        groups_nr = len(self.virtual_groups)
+        groups_nr = len(self._mdf.virtual_groups)
 
         if progress is not None:
             if callable(progress):
@@ -792,21 +787,26 @@ class MDF:
         self.configure(copy_on_get=False)
 
         # walk through all groups and get all channels
-        for i, virtual_group in enumerate(self.virtual_groups):
-            for idx, sigs in enumerate(self._yield_selected_signals(virtual_group, version=version)):
-                if idx == 0:
-                    if sigs:
-                        cg = self.groups[virtual_group].channel_group
-                        cg_nr = out.append(
-                            sigs,
-                            common_timebase=True,
-                            comment=cg.comment,
-                        )
-                        MDF._transfer_channel_group_data(out.groups[cg_nr].channel_group, cg)
-                    else:
-                        break
-                else:
-                    out.extend(cg_nr, sigs)
+        for i, virtual_group in enumerate(self._mdf.virtual_groups):
+            selected_signals = self._mdf._yield_selected_signals(virtual_group, version=version)
+
+            sigs = typing.cast(Optional[list[Signal]], next(selected_signals, None))
+            if sigs:
+                cg = self._mdf.groups[virtual_group].channel_group
+                cg_nr = out._mdf.append(
+                    sigs,
+                    common_timebase=True,
+                    comment=cg.comment,
+                )
+                MDF._transfer_channel_group_data(out._mdf.groups[cg_nr].channel_group, cg)
+            else:
+                continue
+
+            selected_samples = typing.cast(
+                Iterator[list[tuple[NDArray[Any], Optional[NDArray[Any]]]]], selected_signals
+            )
+            for signal_samples in selected_samples:
+                out._mdf.extend(cg_nr, signal_samples)
 
                 if progress and progress.stop:
                     return TERMINATED
@@ -821,7 +821,7 @@ class MDF:
                     if progress.stop:
                         return TERMINATED
 
-        out._transfer_metadata(self, message=f"Converted from {self.name}")
+        out._transfer_metadata(self, message=f"Converted from {self._mdf.name}")
         self.configure(copy_on_get=True)
 
         return out
@@ -831,7 +831,7 @@ class MDF:
         start: float | None = None,
         stop: float | None = None,
         whence: int = 0,
-        version: str | None = None,
+        version: Version | None = None,
         include_ends: bool = True,
         time_from_zero: bool = False,
         progress=None,
@@ -873,13 +873,13 @@ class MDF:
         """
 
         if version is None:
-            version = self.version
+            version = self._mdf.version
         else:
-            version = validate_version_argument(version)
+            version = validate_version_argument(version, self._mdf.default_version)
 
         out = MDF(
             version=version,
-            **self._kwargs,
+            **self._mdf._kwargs,
         )
 
         integer_interpolation_mode = self._integer_interpolation
@@ -890,8 +890,8 @@ class MDF:
 
         if whence == 1:
             timestamps = []
-            for group in self.virtual_groups:
-                master = self.get_master(group, record_offset=0, record_count=1)
+            for group in self._mdf.virtual_groups:
+                master = self._mdf.get_master(group, record_offset=0, record_count=1)
                 if master.size:
                     timestamps.append(master[0])
 
@@ -907,13 +907,13 @@ class MDF:
 
         if time_from_zero:
             delta = start
-            t_epoch = self.header.start_time.timestamp() + delta
-            out.header.start_time = datetime.fromtimestamp(t_epoch)
+            t_epoch = self._mdf.header.start_time.timestamp() + delta
+            out._mdf.header.start_time = datetime.fromtimestamp(t_epoch)
         else:
             delta = 0
-            out.header.start_time = self.header.start_time
+            out._mdf.header.start_time = self._mdf.header.start_time
 
-        groups_nr = len(self.virtual_groups)
+        groups_nr = len(self._mdf.virtual_groups)
 
         if progress is not None:
             if callable(progress):
@@ -923,14 +923,14 @@ class MDF:
                 progress.signals.setMaximum.emit(groups_nr)
 
         # walk through all groups and get all channels
-        for i, (group_index, virtual_group) in enumerate(self.virtual_groups.items()):
-            included_channels = self.included_channels(group_index)[group_index]
+        for i, (group_index, virtual_group) in enumerate(self._mdf.virtual_groups.items()):
+            included_channels = self._mdf.included_channels(group_index)[group_index]
             if not included_channels:
                 continue
 
             idx = 0
             signals = []
-            for j, sigs in enumerate(self._yield_selected_signals(group_index, groups=included_channels)):
+            for j, sigs in enumerate(self._mdf._yield_selected_signals(group_index, groups=included_channels)):
                 if not sigs:
                     break
                 if j == 0:
@@ -1034,18 +1034,18 @@ class MDF:
                         stop_ = f"{stop}s"
                     else:
                         stop_ = "end of measurement"
-                    cg = self.groups[group_index].channel_group
-                    cg_nr = out.append(
+                    cg = self._mdf.groups[group_index].channel_group
+                    cg_nr = out._mdf.append(
                         signals,
                         common_timebase=True,
                         comment=cg.comment,
                     )
-                    MDF._transfer_channel_group_data(out.groups[cg_nr].channel_group, cg)
+                    MDF._transfer_channel_group_data(out._mdf.groups[cg_nr].channel_group, cg)
 
                 else:
                     sigs = [(sig.samples, sig.invalidation_bits) for sig in signals]
                     sigs.insert(0, (master, None))
-                    out.extend(cg_nr, sigs)
+                    out._mdf.extend(cg_nr, sigs)
 
                 idx += 1
 
@@ -1069,12 +1069,12 @@ class MDF:
                     stop_ = f"{stop}s"
                 else:
                     stop_ = "end of measurement"
-                cg = self.groups[group_index].channel_group
-                cg_nr = out.append(
+                cg = self._mdf.groups[group_index].channel_group
+                cg_nr = out._mdf.append(
                     signals,
                     common_timebase=True,
                 )
-                MDF._transfer_channel_group_data(out.groups[cg_nr].channel_group, cg)
+                MDF._transfer_channel_group_data(out._mdf.groups[cg_nr].channel_group, cg)
 
             if progress is not None:
                 if callable(progress):
@@ -1096,9 +1096,9 @@ class MDF:
         self,
         fmt: Literal["asc", "csv", "hdf5", "mat", "parquet"],
         filename: StrPathType | None = None,
-        progress=None,
+        progress: Callable[[int, int], None] | Any | None = None,
         **kwargs,
-    ) -> None:
+    ) -> object | None:
         r"""export *MDF* to other formats. The *MDF* file name is used is
         available, else the *filename* argument must be provided.
 
@@ -1232,7 +1232,7 @@ class MDF:
 
         fmt = fmt.lower()
 
-        if fmt != "pandas" and filename is None and self.name is None:
+        if fmt != "pandas" and filename is None and self._mdf.name is None:
             message = "Must specify filename for export" "if MDF was created without a file name"
             logger.warning(message)
             return
@@ -1257,7 +1257,7 @@ class MDF:
                 logger.warning("snappy compressor is not installed; compression will be set to GZIP")
                 compression = "GZIP"
 
-        filename = Path(filename) if filename else self.name
+        filename = Path(filename) if filename else self._mdf.name
 
         if fmt == "parquet":
             try:
@@ -1320,7 +1320,7 @@ class MDF:
             comments = {}
             used_names = UniqueDB()
 
-            groups_nr = len(self.groups)
+            groups_nr = len(self._mdf.groups)
             if progress is not None:
                 if callable(progress):
                     progress(0, groups_nr * 2)
@@ -1330,7 +1330,7 @@ class MDF:
                     if progress.stop:
                         return TERMINATED
 
-            for i, grp in enumerate(self.groups):
+            for i, grp in enumerate(self._mdf.groups):
                 if progress is not None and progress.stop:
                     return TERMINATED
 
@@ -1370,9 +1370,9 @@ class MDF:
                     # header information
                     group = hdf.create_group(str(filename))
 
-                    if self.version in MDF2_VERSIONS + MDF3_VERSIONS:
+                    if isinstance(self._mdf, (mdf_v2.MDF2, mdf_v3.MDF3)):
                         for item in header_items:
-                            group.attrs[item] = self.header[item].replace(b"\0", b"")
+                            group.attrs[item] = self._mdf.header[item].replace(b"\0", b"")
 
                     # save each data group in a HDF5 group called
                     # "DataGroup_<cntr>" with the index starting from 1
@@ -1427,16 +1427,16 @@ class MDF:
                     # header information
                     group = hdf.create_group(str(filename))
 
-                    if self.version in MDF2_VERSIONS + MDF3_VERSIONS:
+                    if isinstance(self._mdf, (mdf_v2.MDF2, mdf_v3.MDF3)):
                         for item in header_items:
-                            group.attrs[item] = self.header[item].replace(b"\0", b"")
+                            group.attrs[item] = self._mdf.header[item].replace(b"\0", b"")
 
                     # save each data group in a HDF5 group called
                     # "DataGroup_<cntr>" with the index starting from 1
                     # each HDF5 group will have a string attribute "master"
                     # that will hold the name of the master channel
 
-                    groups_nr = len(self.virtual_groups)
+                    groups_nr = len(self._mdf.virtual_groups)
 
                     if progress is not None:
                         if callable(progress):
@@ -1448,8 +1448,8 @@ class MDF:
                             if progress.stop:
                                 return TERMINATED
 
-                    for i, (group_index, virtual_group) in enumerate(self.virtual_groups.items()):
-                        channels = self.included_channels(group_index)[group_index]
+                    for i, (group_index, virtual_group) in enumerate(self._mdf.virtual_groups.items()):
+                        channels = self._mdf.included_channels(group_index)[group_index]
 
                         if not channels:
                             continue
@@ -1459,7 +1459,7 @@ class MDF:
                             return TERMINATED
 
                         if len(virtual_group.groups) == 1:
-                            comment = self.groups[virtual_group.groups[0]].channel_group.comment
+                            comment = self._mdf.groups[virtual_group.groups[0]].channel_group.comment
                         else:
                             comment = "Virtual group i"
 
@@ -1468,11 +1468,11 @@ class MDF:
 
                         group.attrs["comment"] = comment
 
-                        master_index = self.masters_db.get(group_index, -1)
+                        master_index = self._mdf.masters_db.get(group_index, -1)
 
                         if master_index >= 0:
-                            group.attrs["master"] = self.groups[group_index].channels[master_index].name
-                            master = self.get(group.attrs["master"], group_index)
+                            group.attrs["master"] = self._mdf.groups[group_index].channels[master_index].name
+                            master = self._mdf.get(group.attrs["master"], group_index)
                             if reduce_memory_usage:
                                 master.timestamps = downcast(master.timestamps)
                             if compression:
@@ -1560,7 +1560,7 @@ class MDF:
 
                 if time_as_date:
                     index = (
-                        pd.to_datetime(df.index + self.header.start_time.timestamp(), unit="s")
+                        pd.to_datetime(df.index + self._mdf.header.start_time.timestamp(), unit="s")
                         .tz_localize("UTC")
                         .tz_convert(LOCAL_TIMEZONE)
                         .astype(str)
@@ -1648,7 +1648,7 @@ class MDF:
 
                 filename = filename.with_suffix(".csv")
 
-                gp_count = len(self.virtual_groups)
+                gp_count = len(self._mdf.virtual_groups)
 
                 if progress is not None:
                     if callable(progress):
@@ -1660,7 +1660,7 @@ class MDF:
                         if progress.stop:
                             return TERMINATED
 
-                for i, (group_index, virtual_group) in enumerate(self.virtual_groups.items()):
+                for i, (group_index, virtual_group) in enumerate(self._mdf.virtual_groups.items()):
                     if progress is not None and progress.stop:
                         return TERMINATED
 
@@ -1668,7 +1668,7 @@ class MDF:
                     logger.info(message)
 
                     if len(virtual_group.groups) == 1:
-                        comment = self.groups[virtual_group.groups[0]].channel_group.comment
+                        comment = self._mdf.groups[virtual_group.groups[0]].channel_group.comment
                     else:
                         comment = ""
 
@@ -1693,9 +1693,9 @@ class MDF:
                         units = {}
                         used_names = UniqueDB()
 
-                        for gp_index, channel_indexes in self.included_channels(group_index)[group_index].items():
+                        for gp_index, channel_indexes in self._mdf.included_channels(group_index)[group_index].items():
                             for ch_index in channel_indexes:
-                                ch = self.groups[gp_index].channels[ch_index]
+                                ch = self._mdf.groups[gp_index].channels[ch_index]
 
                                 if use_display_names:
                                     channel_name = list(ch.display_names)[0] if ch.display_names else ch.name
@@ -1717,7 +1717,7 @@ class MDF:
 
                     if time_as_date:
                         index = (
-                            pd.to_datetime(df.index + self.header.start_time.timestamp(), unit="s")
+                            pd.to_datetime(df.index + self._mdf.header.start_time.timestamp(), unit="s")
                             .tz_localize("UTC")
                             .tz_convert(LOCAL_TIMEZONE)
                             .astype(str)
@@ -1794,13 +1794,13 @@ class MDF:
 
                     return dct
 
-                mdict = {}
+                mdict: dict[str, NDArray[Any]] = {}
 
                 master_name_template = "DGM{}_{}"
                 channel_name_template = "DG{}_{}"
                 used_names = UniqueDB()
 
-                groups_nr = len(self.virtual_groups)
+                groups_nr = len(self._mdf.virtual_groups)
 
                 if progress is not None:
                     if callable(progress):
@@ -1812,11 +1812,11 @@ class MDF:
                         if progress.stop:
                             return TERMINATED
 
-                for i, (group_index, virtual_group) in enumerate(self.virtual_groups.items()):
+                for i, (group_index, virtual_group) in enumerate(self._mdf.virtual_groups.items()):
                     if progress is not None and progress.stop:
                         return TERMINATED
 
-                    channels = self.included_channels(group_index)[group_index]
+                    channels = self._mdf.included_channels(group_index)[group_index]
 
                     if not channels:
                         continue
@@ -1967,7 +1967,20 @@ class MDF:
             message.format(fmt)
             logger.warning(message)
 
-    def filter(self, channels: ChannelsType, version: str | None = None, progress=None) -> MDF:
+    @overload
+    def filter(self, channels: ChannelsType, version: Version | None = ..., progress: None = ...) -> MDF: ...
+
+    @overload
+    def filter(
+        self, channels: ChannelsType, version: Version | None = ..., progress: Callable[[int, int], None] | Any = ...
+    ) -> MDF | object: ...
+
+    def filter(
+        self,
+        channels: ChannelsType,
+        version: Version | None = None,
+        progress: Callable[[int, int], None] | Any | None = None,
+    ) -> MDF | object:
         """return new *MDF* object that contains only the channels listed in
         *channels* argument
 
@@ -2033,36 +2046,42 @@ class MDF:
 
         """
         if version is None:
-            version = self.version
+            version = self._mdf.version
         else:
-            version = validate_version_argument(version)
+            version = validate_version_argument(version, self._mdf.default_version)
 
         _raise_on_multiple_occurrences = self._raise_on_multiple_occurrences
         self._raise_on_multiple_occurrences = False
 
-        names_map = {}
+        names_map: dict[tuple[int, int], str] = {}
         for item in channels:
             if isinstance(item, str):
-                entry = self._validate_channel_selection(item)
+                entry = self._mdf._validate_channel_selection(item)
                 name = item
             else:
-                if name := item[0]:
-                    entry = self._validate_channel_selection(*item)
+                if item[0]:
+                    name = item[0]
+                    if len(item) == 3:
+                        _, group, index = item
+                    else:
+                        _, group = item
+                        index = None
+                    entry = self._mdf._validate_channel_selection(name, group, index)
                 else:
                     continue
             names_map[entry] = name
         self._raise_on_multiple_occurrences = _raise_on_multiple_occurrences
 
         # group channels by group index
-        gps = self.included_channels(channels=channels)
+        gps = self._mdf.included_channels(channels=channels)
 
         mdf = MDF(
             version=version,
-            **self._kwargs,
+            **self._mdf._kwargs,
         )
 
         mdf.configure(from_other=self)
-        mdf.header.start_time = self.header.start_time
+        mdf._mdf.header.start_time = self._mdf.header.start_time
 
         self.configure(copy_on_get=False)
 
@@ -2079,30 +2098,35 @@ class MDF:
                     return TERMINATED
 
         for i, (group_index, groups) in enumerate(gps.items()):
-            for idx, sigs in enumerate(self._yield_selected_signals(group_index, groups=groups, version=version)):
-                if not sigs:
+            selected_signals = self._mdf._yield_selected_signals(group_index, groups=groups, version=version)
+
+            sigs = typing.cast(Optional[list[Signal]], next(selected_signals, None))
+
+            if not sigs:
+                continue
+
+            for sig in sigs:
+                entry = sig.group_index, sig.channel_index
+                if entry in names_map:
+                    sig.name = names_map[entry]
+            cg = self._mdf.groups[group_index].channel_group
+            cg_nr = mdf._mdf.append(
+                sigs,
+                common_timebase=True,
+                comment=cg.comment,
+                acq_name=getattr(cg, "acq_name", None),
+                acq_source=getattr(cg, "acq_source", None),
+            )
+            MDF._transfer_channel_group_data(mdf._mdf.groups[cg_nr].channel_group, cg)
+
+            selected_samples = typing.cast(
+                Iterator[list[tuple[NDArray[Any], Optional[NDArray[Any]]]]], selected_signals
+            )
+
+            for signal_samples in selected_samples:
+                if not signal_samples:
                     break
-
-                if idx == 0:
-                    if sigs:
-                        for sig in sigs:
-                            entry = sig.group_index, sig.channel_index
-                            if entry in names_map:
-                                sig.name = names_map[entry]
-                        cg = self.groups[group_index].channel_group
-                        cg_nr = mdf.append(
-                            sigs,
-                            common_timebase=True,
-                            comment=cg.comment,
-                            acq_name=getattr(cg, "acq_name", None),
-                            acq_source=getattr(cg, "acq_source", None),
-                        )
-                        MDF._transfer_channel_group_data(mdf.groups[cg_nr].channel_group, cg)
-                    else:
-                        break
-
-                else:
-                    mdf.extend(cg_nr, sigs)
+                mdf._mdf.extend(cg_nr, signal_samples)
 
                 if progress and progress.stop:
                     return TERMINATED
@@ -2118,7 +2142,7 @@ class MDF:
 
         self.configure(copy_on_get=True)
 
-        mdf._transfer_metadata(self, message=f"Filtered from {self.name}")
+        mdf._transfer_metadata(self, message=f"Filtered from {self._mdf.name}")
 
         return mdf
 
@@ -2179,14 +2203,14 @@ class MDF:
 
         """
 
-        gp_nr, ch_nr = self._validate_channel_selection(name, group, index)
+        gp_nr, ch_nr = self._mdf._validate_channel_selection(name, group, index)
 
-        grp = self.groups[gp_nr]
+        grp = self._mdf.groups[gp_nr]
 
-        data = self._load_data(grp)
+        data = self._mdf._load_data(grp)
 
         for fragment in data:
-            yield self.get(
+            yield self._mdf.get(
                 group=gp_nr,
                 index=ch_nr,
                 raster=raster,
@@ -2198,14 +2222,14 @@ class MDF:
 
     @staticmethod
     def concatenate(
-        files: Sequence[MDF | InputType],
-        version: str = "4.10",
+        files: Sequence[StrPathType | MDF | FileLike],
+        version: Version = "4.10",
         sync: bool = True,
         add_samples_origin: bool = False,
         direct_timestamp_continuation: bool = False,
         progress=None,
         **kwargs,
-    ) -> MDF:
+    ) -> MDF | object:
         """concatenates several files. The files
         must have the same internal structure (same number of groups, and same
         channels in each group).
@@ -2285,79 +2309,79 @@ class MDF:
         mdf_nr = len(files)
         use_display_names = kwargs.get("use_display_names", False)
 
-        input_types = [isinstance(mdf, MDF) for mdf in files]
+        input_types = [isinstance(file, MDF) for file in files]
 
-        versions = []
+        versions: list[Version] = []
         if sync:
-            timestamps = []
+            datetimes: list[datetime] = []
             for file in files:
                 if isinstance(file, MDF):
-                    timestamps.append(file.header.start_time)
-                    versions.append(file.version)
+                    datetimes.append(file._mdf.header.start_time)
+                    versions.append(file._mdf.version)
                 else:
                     if is_file_like(file):
                         ts, version = get_measurement_timestamp_and_version(file)
-                        timestamps.append(ts)
+                        datetimes.append(ts)
                         versions.append(version)
                     else:
-                        with open(file, "rb") as mdf:
-                            ts, version = get_measurement_timestamp_and_version(mdf)
-                            timestamps.append(ts)
+                        with open(file, "rb") as bytes_io:
+                            ts, version = get_measurement_timestamp_and_version(bytes_io)
+                            datetimes.append(ts)
                             versions.append(version)
 
             try:
-                oldest = min(timestamps)
+                oldest = min(datetimes)
             except TypeError:
-                timestamps = [timestamp.astimezone(timezone.utc) for timestamp in timestamps]
-                oldest = min(timestamps)
+                datetimes = [timestamp.astimezone(timezone.utc) for timestamp in datetimes]
+                oldest = min(datetimes)
 
-            offsets = [(timestamp - oldest).total_seconds() for timestamp in timestamps]
+            offsets = [(timestamp - oldest).total_seconds() for timestamp in datetimes]
             offsets = [max(0, offset) for offset in offsets]
 
         else:
             file = files[0]
             if isinstance(file, MDF):
-                timestamp = file.header.start_time
-                version = file.version
+                timestamp = file._mdf.header.start_time
+                version = file._mdf.version
             else:
                 if is_file_like(file):
                     timestamp, version = get_measurement_timestamp_and_version(file)
                 else:
-                    with open(file, "rb") as mdf:
-                        timestamp, version = get_measurement_timestamp_and_version(mdf)
+                    with open(file, "rb") as bytes_io:
+                        timestamp, version = get_measurement_timestamp_and_version(bytes_io)
 
             oldest = timestamp
             versions.append(version)
 
             offsets = [0 for _ in files]
 
-        included_channel_names = []
+        included_channel_names: list[list[str]] = []
         cg_map = {}
 
         if add_samples_origin:
-            origin_conversion = {}
-            for i, mdf in enumerate(files):
+            origin_conversion: dict[str, Any] = {}
+            for i, file in enumerate(files):
                 origin_conversion[f"val_{i}"] = i
-                origin_conversion[f"text_{i}"] = str(mdf.original_name if isinstance(mdf, MDF) else str(mdf))
-            origin_conversion = from_dict(origin_conversion)
+                origin_conversion[f"text_{i}"] = str(file._mdf.original_name if isinstance(file, MDF) else str(file))
+            channel_conversion = from_dict(origin_conversion)
 
-        for mdf_index, (offset, mdf) in enumerate(zip(offsets, files)):
-            if not isinstance(mdf, MDF):
-                mdf = MDF(mdf, use_display_names=use_display_names)
+        for mdf_index, (offset, file) in enumerate(zip(offsets, files)):
+            if not isinstance(file, MDF):
+                mdf = MDF(file, use_display_names=use_display_names)
                 close = True
             else:
                 close = False
 
             if progress is not None and not callable(progress):
                 progress.signals.setLabelText.emit(
-                    f"Concatenating the file {mdf_index + 1} of {mdf_nr}\n{mdf.original_name}"
+                    f"Concatenating the file {mdf_index + 1} of {mdf_nr}\n{mdf._mdf.original_name}"
                 )
 
             if mdf_index == 0:
-                version = validate_version_argument(version)
-                first_version = mdf.version
+                version = validate_version_argument(version, mdf._mdf.default_version)
+                first_version = mdf._mdf.version
 
-                kwargs = dict(mdf._kwargs)
+                kwargs = dict(mdf._mdf._kwargs)
 
                 merged = MDF(
                     version=version,
@@ -2366,17 +2390,17 @@ class MDF:
 
                 merged.configure(from_other=mdf)
 
-                merged.header.start_time = oldest
+                merged._mdf.header.start_time = oldest
 
             mdf.configure(copy_on_get=False)
 
             reorder_channel_groups = False
-            cg_translations = {}
+            cg_translations: dict[int, int] = {}
 
             vlsd_max_length = {}
 
             if mdf_index == 0:
-                last_timestamps = [None for gp in mdf.virtual_groups]
+                last_timestamps = [None for gp in mdf._mdf.virtual_groups]
                 groups_nr = len(last_timestamps)
                 first_mdf = mdf
 
@@ -2395,7 +2419,7 @@ class MDF:
 
                     vlds_channels = []
 
-                    for _gp_idx, _gp in enumerate(w_mdf.groups):
+                    for _gp_idx, _gp in enumerate(w_mdf._mdf.groups):
                         for _ch_idx, _ch in enumerate(_gp.channels):
                             if _ch.channel_type == v4c.CHANNEL_TYPE_VLSD:
                                 vlds_channels.append((_ch.name, _gp_idx, _ch_idx))
@@ -2410,7 +2434,7 @@ class MDF:
                             else:
                                 _close = False
 
-                            _file.determine_max_vlsd_sample_size.cache_clear()
+                            _file._mdf.determine_max_vlsd_sample_size.cache_clear()
 
                             for _ch_name, _gp_idx, _ch_idx in vlds_channels:
                                 key = (_ch_name, _gp_idx)
@@ -2418,7 +2442,7 @@ class MDF:
                                     if _second_gp_idx == _gp_idx:
                                         vlsd_max_length[key] = max(
                                             vlsd_max_length[key],
-                                            _file.determine_max_vlsd_sample_size(_second_gp_idx, _second_ch_idx),
+                                            _file._mdf.determine_max_vlsd_sample_size(_second_gp_idx, _second_ch_idx),
                                         )
                                         break
                                 else:
@@ -2427,23 +2451,21 @@ class MDF:
                                     )
 
                             if _close:
-                                _file.close()
+                                _file._mdf.close()
 
             else:
-                if len(mdf.virtual_groups) != groups_nr:
+                if len(mdf._mdf.virtual_groups) != groups_nr:
                     raise MdfException(
-                        f"internal structure of file <{mdf.name}> is different; different channel groups count"
+                        f"internal structure of file <{mdf._mdf.name}> is different; different channel groups count"
                     )
                 else:
-                    cg_translations = dict.fromkeys(range(groups_nr))
-
                     make_translation = False
 
                     # check if the order of the channel groups is the same
-                    for i, group_index in enumerate(mdf.virtual_groups):
-                        included_channels = mdf.included_channels(group_index)[group_index]
+                    for i, group_index in enumerate(mdf._mdf.virtual_groups):
+                        included_channels = mdf._mdf.included_channels(group_index)[group_index]
                         names = [
-                            mdf.groups[gp_index].channels[ch_index].name
+                            mdf._mdf.groups[gp_index].channels[ch_index].name
                             for gp_index, channels in included_channels.items()
                             for ch_index in channels
                         ]
@@ -2454,10 +2476,14 @@ class MDF:
                                 break
 
                     # Make a channel group translation dictionary if the order is different
-                    if make_translation:
-                        for i, org_group in enumerate(first_mdf.groups):
+                    if (
+                        make_translation
+                        and isinstance(first_mdf._mdf, mdf_v4.MDF4)
+                        and isinstance(mdf._mdf, mdf_v4.MDF4)
+                    ):
+                        for i, org_group in enumerate(first_mdf._mdf.groups):
                             org_group_source = org_group.channel_group.acq_source
-                            for j, new_group in enumerate(mdf.groups):
+                            for j, new_group in enumerate(mdf._mdf.groups):
                                 new_group_source = new_group.channel_group.acq_source
                                 if (
                                     new_group.channel_group.acq_name == org_group.channel_group.acq_name
@@ -2467,10 +2493,10 @@ class MDF:
                                     and new_group.channel_group.samples_byte_nr
                                     == org_group.channel_group.samples_byte_nr
                                 ):
-                                    new_included_channels = mdf.included_channels(j)[j]
+                                    new_included_channels = mdf._mdf.included_channels(j)[j]
 
                                     new_names = [
-                                        mdf.groups[gp_index].channels[ch_index].name
+                                        mdf._mdf.groups[gp_index].channels[ch_index].name
                                         for gp_index, channels in new_included_channels.items()
                                         for ch_index in channels
                                     ]
@@ -2479,19 +2505,19 @@ class MDF:
                                         cg_translations[i] = j
                                         break
 
-            for i, group_index in enumerate(mdf.virtual_groups):
+            for i, group_index in enumerate(mdf._mdf.virtual_groups):
                 # save original group index for extension
                 # replace with the translated group index
                 if reorder_channel_groups:
                     origin_gp_idx = group_index
                     group_index = cg_translations[group_index]
 
-                included_channels = mdf.included_channels(group_index)[group_index]
+                included_channels = mdf._mdf.included_channels(group_index)[group_index]
 
                 if mdf_index == 0:
                     included_channel_names.append(
                         [
-                            mdf.groups[gp_index].channels[ch_index].name
+                            mdf._mdf.groups[gp_index].channels[ch_index].name
                             for gp_index, channels in included_channels.items()
                             for ch_index in channels
                         ]
@@ -2499,7 +2525,7 @@ class MDF:
                     different_channel_order = False
                 else:
                     names = [
-                        mdf.groups[gp_index].channels[ch_index].name
+                        mdf._mdf.groups[gp_index].channels[ch_index].name
                         for gp_index, channels in included_channels.items()
                         for ch_index in channels
                     ]
@@ -2521,101 +2547,155 @@ class MDF:
                 first_timestamp = None
                 original_first_timestamp = None
 
-                mdf.vlsd_max_length.clear()
-                mdf.vlsd_max_length.update(vlsd_max_length)
+                mdf._mdf.vlsd_max_length.clear()
+                mdf._mdf.vlsd_max_length.update(vlsd_max_length)
 
-                for idx, signals in enumerate(mdf._yield_selected_signals(group_index, groups=included_channels)):
-                    if not signals:
-                        break
-                    if mdf_index == 0 and idx == 0:
-                        first_signal = signals[0]
-                        if len(first_signal):
-                            if offset > 0:
-                                timestamps = first_signal.timestamps + offset
-                                for sig in signals:
-                                    sig.timestamps = timestamps
-                            last_timestamp = first_signal.timestamps[-1]
-                            first_timestamp = first_signal.timestamps[0]
-                            original_first_timestamp = first_timestamp
+                selected_signals = mdf._mdf._yield_selected_signals(group_index, groups=included_channels)
+
+                signals = typing.cast(Optional[list[Signal]], next(selected_signals, None))
+
+                if not signals:
+                    continue
+
+                if mdf_index == 0:
+                    first_signal = signals[0]
+                    if len(first_signal):
+                        if offset > 0:
+                            timestamps = first_signal.timestamps + offset
+                            for signal in signals:
+                                signal.timestamps = timestamps
+                        last_timestamp = first_signal.timestamps[-1]
+                        first_timestamp = first_signal.timestamps[0]
+                        original_first_timestamp = first_timestamp
+
+                    if add_samples_origin:
+                        signals.append(
+                            Signal(
+                                samples=np.ones(len(first_signal), dtype="<u2") * mdf_index,
+                                timestamps=first_signal.timestamps,
+                                conversion=channel_conversion,
+                                name="__samples_origin",
+                            )
+                        )
+
+                    cg = mdf._mdf.groups[group_index].channel_group
+                    cg_nr = merged._mdf.append(
+                        signals,
+                        common_timebase=True,
+                    )
+                    MDF._transfer_channel_group_data(merged._mdf.groups[cg_nr].channel_group, cg)
+                    cg_map[group_index] = cg_nr
+
+                else:
+                    if different_channel_order:
+                        new_signals = signals.copy()
+                        for new_index, signal in zip(remap, signals):
+                            new_signals[new_index] = signal
+
+                        signals = new_signals
+
+                    signal_samples = [(signals[0].timestamps, None)] + [
+                        (signal.samples, signal.invalidation_bits) for signal in signals
+                    ]
+
+                    master_signal = signal_samples[0][0]
+                    _copied = False
+
+                    if len(master_signal):
+                        if original_first_timestamp is None:
+                            original_first_timestamp = master_signal[0]
+                        if offset > 0:
+                            master = master_signal + offset
+                            _copied = True
+                        if last_timestamp is None:
+                            last_timestamp = master_signal[-1]
+                        else:
+                            if last_timestamp >= master_signal[0] or direct_timestamp_continuation:
+                                if len(master_signal) >= 2:
+                                    delta = master_signal[1] - master_signal[0]
+                                else:
+                                    delta = 0.001
+                                if _copied:
+                                    master_signal -= master_signal[0]
+                                else:
+                                    master_signal = master_signal - master_signal[0]
+                                    _copied = True
+                                master_signal += last_timestamp + delta
+                            last_timestamp = master_signal[-1]
+
+                        signal_samples[0] = master_signal, None
 
                         if add_samples_origin:
-                            signals.append(
-                                Signal(
-                                    samples=np.ones(len(first_signal), dtype="<u2") * mdf_index,
-                                    timestamps=first_signal.timestamps,
-                                    conversion=origin_conversion,
-                                    name="__samples_origin",
+                            signal_samples.append(
+                                (
+                                    np.ones(len(master_signal), dtype="<u2") * mdf_index,
+                                    None,
                                 )
                             )
+                        cg_nr = cg_map[group_index]
+                        # set the original channel group number back for extension
+                        if reorder_channel_groups:
+                            cg_nr = cg_map[origin_gp_idx]
+                        merged._mdf.extend(cg_nr, signal_samples)
 
-                        cg = mdf.groups[group_index].channel_group
-                        cg_nr = merged.append(
-                            signals,
-                            common_timebase=True,
-                        )
-                        MDF._transfer_channel_group_data(merged.groups[cg_nr].channel_group, cg)
-                        cg_map[group_index] = cg_nr
+                        if first_timestamp is None:
+                            first_timestamp = master_signal[0]
 
-                    else:
-                        if different_channel_order:
-                            new_signals = [None for _ in signals]
-                            if idx == 0:
-                                for new_index, sig in zip(remap, signals):
-                                    new_signals[new_index] = sig
-                            else:
-                                for new_index, sig in zip(remap, signals[1:]):
-                                    new_signals[new_index + 1] = sig
-                                new_signals[0] = signals[0]
+                selected_samples = typing.cast(
+                    Iterator[list[tuple[NDArray[Any], Optional[NDArray[Any]]]]], selected_signals
+                )
 
-                            signals = new_signals
+                for signal_samples in selected_samples:
+                    if different_channel_order:
+                        new_signal_samples = signal_samples.copy()
+                        for new_index, sig in zip(remap, signal_samples[1:]):
+                            new_signal_samples[new_index + 1] = sig
+                        new_signal_samples[0] = signal_samples[0]
 
-                        if idx == 0:
-                            signals = [(signals[0].timestamps, None)] + [
-                                (sig.samples, sig.invalidation_bits) for sig in signals
-                            ]
+                        signal_samples = new_signal_samples
 
-                        master = signals[0][0]
-                        _copied = False
+                    master = signal_samples[0][0]
+                    _copied = False
 
-                        if len(master):
-                            if original_first_timestamp is None:
-                                original_first_timestamp = master[0]
-                            if offset > 0:
-                                master = master + offset
-                                _copied = True
-                            if last_timestamp is None:
-                                last_timestamp = master[-1]
-                            else:
-                                if last_timestamp >= master[0] or direct_timestamp_continuation:
-                                    if len(master) >= 2:
-                                        delta = master[1] - master[0]
-                                    else:
-                                        delta = 0.001
-                                    if _copied:
-                                        master -= master[0]
-                                    else:
-                                        master = master - master[0]
-                                        _copied = True
-                                    master += last_timestamp + delta
-                                last_timestamp = master[-1]
+                    if len(master):
+                        if original_first_timestamp is None:
+                            original_first_timestamp = master[0]
+                        if offset > 0:
+                            master = master + offset
+                            _copied = True
+                        if last_timestamp is None:
+                            last_timestamp = master[-1]
+                        else:
+                            if last_timestamp >= master[0] or direct_timestamp_continuation:
+                                if len(master) >= 2:
+                                    delta = master[1] - master[0]
+                                else:
+                                    delta = 0.001
+                                if _copied:
+                                    master -= master[0]
+                                else:
+                                    master = master - master[0]
+                                    _copied = True
+                                master += last_timestamp + delta
+                            last_timestamp = master[-1]
 
-                            signals[0] = master, None
+                        signal_samples[0] = master, None
 
-                            if add_samples_origin:
-                                signals.append(
-                                    (
-                                        np.ones(len(master), dtype="<u2") * mdf_index,
-                                        None,
-                                    )
+                        if add_samples_origin:
+                            signal_samples.append(
+                                (
+                                    np.ones(len(master), dtype="<u2") * mdf_index,
+                                    None,
                                 )
-                            cg_nr = cg_map[group_index]
-                            # set the original channel group number back for extension
-                            if reorder_channel_groups:
-                                cg_nr = cg_map[origin_gp_idx]
-                            merged.extend(cg_nr, signals)
+                            )
+                        cg_nr = cg_map[group_index]
+                        # set the original channel group number back for extension
+                        if reorder_channel_groups:
+                            cg_nr = cg_map[origin_gp_idx]
+                        merged._mdf.extend(cg_nr, signal_samples)
 
-                            if first_timestamp is None:
-                                first_timestamp = master[0]
+                        if first_timestamp is None:
+                            first_timestamp = master[0]
 
                     if progress and progress.stop:
                         return TERMINATED
@@ -2637,26 +2717,24 @@ class MDF:
                         return TERMINATED
 
             if close and mdf_index:
-                mdf.close()
+                mdf._mdf.close()
 
-        if not isinstance(files[0], MDF):
-            first_mdf.close()
+        if isinstance(files[0], MDF):
+            files[0]._mdf.close()
 
-        try:
-            merged._process_bus_logging()
-        except:
-            pass
+        if isinstance(merged._mdf, mdf_v4.MDF4):
+            merged._mdf._process_bus_logging()
 
         return merged
 
     @staticmethod
     def stack(
-        files: Sequence[MDF | InputType],
-        version: str = "4.10",
+        files: Sequence[StrPathType | MDF | FileLike],
+        version: Version = "4.10",
         sync: bool = True,
         progress=None,
         **kwargs,
-    ) -> MDF:
+    ) -> MDF | object:
         """stack several files and return the stacked *MDF* object
 
         Parameters
@@ -2700,13 +2778,13 @@ class MDF:
         if not files:
             raise MdfException("No files given for stack")
 
-        version = validate_version_argument(version)
+        version = validate_version_argument(version, mdf_v4.MDF4.default_version)
 
         use_display_names = kwargs.get("use_display_names", False)
 
         files_nr = len(files)
 
-        input_types = [isinstance(mdf, MDF) for mdf in files]
+        input_types = [isinstance(file, MDF) for file in files]
 
         if progress is not None:
             if callable(progress):
@@ -2719,43 +2797,45 @@ class MDF:
                     return TERMINATED
 
         if sync:
-            timestamps = []
+            datetimes: list[datetime] = []
             for file in files:
                 if isinstance(file, MDF):
-                    timestamps.append(file.header.start_time)
+                    datetimes.append(file._mdf.header.start_time)
                 else:
                     if is_file_like(file):
                         ts, version = get_measurement_timestamp_and_version(file)
-                        timestamps.append(ts)
+                        datetimes.append(ts)
                     else:
-                        with open(file, "rb") as mdf:
-                            ts, version = get_measurement_timestamp_and_version(mdf)
-                            timestamps.append(ts)
+                        with open(file, "rb") as bytes_io:
+                            ts, version = get_measurement_timestamp_and_version(bytes_io)
+                            datetimes.append(ts)
 
             try:
-                oldest = min(timestamps)
+                oldest = min(datetimes)
             except TypeError:
-                timestamps = [timestamp.astimezone(timezone.utc) for timestamp in timestamps]
-                oldest = min(timestamps)
+                datetimes = [timestamp.astimezone(timezone.utc) for timestamp in datetimes]
+                oldest = min(datetimes)
 
-            offsets = [(timestamp - oldest).total_seconds() for timestamp in timestamps]
+            offsets = [(timestamp - oldest).total_seconds() for timestamp in datetimes]
 
         else:
             offsets = [0 for file in files]
 
-        for mdf_index, (offset, mdf) in enumerate(zip(offsets, files)):
-            if not isinstance(mdf, MDF):
-                mdf = MDF(mdf, use_display_names=use_display_names)
+        for mdf_index, (offset, file) in enumerate(zip(offsets, files)):
+            if not isinstance(file, MDF):
+                mdf = MDF(file, use_display_names=use_display_names)
+            else:
+                mdf = file
 
             if progress is not None:
                 progress.signals.setLabelText.emit(
-                    f"Stacking file {mdf_index+1} of {files_nr}\n" f"{mdf.original_name.name}"
+                    f"Stacking file {mdf_index+1} of {files_nr}\n" f"{mdf._mdf.original_name.name}"
                 )
 
             if mdf_index == 0:
-                version = validate_version_argument(version)
+                version = validate_version_argument(version, mdf._mdf.default_version)
 
-                kwargs = dict(mdf._kwargs)
+                kwargs = dict(mdf._mdf._kwargs)
 
                 stacked = MDF(
                     version=version,
@@ -2765,50 +2845,58 @@ class MDF:
                 stacked.configure(from_other=mdf)
 
                 if sync:
-                    stacked.header.start_time = oldest
+                    stacked._mdf.header.start_time = oldest
                 else:
-                    stacked.header.start_time = mdf.header.start_time
+                    stacked._mdf.header.start_time = mdf._mdf.header.start_time
 
             mdf.configure(copy_on_get=False)
 
-            for i, group in enumerate(mdf.virtual_groups):
+            for i, group in enumerate(mdf._mdf.virtual_groups):
                 dg_cntr = None
-                included_channels = mdf.included_channels(group)[group]
+                included_channels = mdf._mdf.included_channels(group)[group]
                 if not included_channels:
                     continue
 
-                for idx, signals in enumerate(
-                    mdf._yield_selected_signals(group, groups=included_channels, version=version)
-                ):
-                    if not signals:
-                        break
-                    if idx == 0:
-                        if sync:
-                            timestamps = signals[0].timestamps + offset
-                            for sig in signals:
-                                sig.timestamps = timestamps
-                        cg = mdf.groups[group].channel_group
-                        dg_cntr = stacked.append(
-                            signals,
-                            common_timebase=True,
-                        )
-                        MDF._transfer_channel_group_data(stacked.groups[dg_cntr].channel_group, cg)
-                    else:
-                        master = signals[0][0]
-                        if sync:
-                            master = master + offset
-                            signals[0] = master, None
+                selected_signals = mdf._mdf._yield_selected_signals(group, groups=included_channels, version=version)
 
-                        stacked.extend(dg_cntr, signals)
+                signals = typing.cast(Optional[list[Signal]], next(selected_signals, None))
 
-                    if progress and progress.stop:
-                        return TERMINATED
+                if not signals:
+                    continue
 
-                if dg_cntr is not None:
-                    for index in range(dg_cntr, len(stacked.groups)):
-                        stacked.groups[index].channel_group.comment = (
-                            f'stacked from channel group {i} of "{mdf.name.parent}"'
-                        )
+                if sync:
+                    timestamps = signals[0].timestamps + offset
+                    for sig in signals:
+                        sig.timestamps = timestamps
+                cg = mdf._mdf.groups[group].channel_group
+                dg_cntr = stacked._mdf.append(
+                    signals,
+                    common_timebase=True,
+                )
+                MDF._transfer_channel_group_data(stacked._mdf.groups[dg_cntr].channel_group, cg)
+
+                if progress and progress.stop:
+                    return TERMINATED
+
+                selected_samples = typing.cast(
+                    Iterator[list[tuple[NDArray[Any], Optional[NDArray[Any]]]]], selected_signals
+                )
+
+                for signal_samples in selected_samples:
+                    master = signal_samples[0][0]
+                    if sync:
+                        master = master + offset
+                        signal_samples[0] = master, None
+
+                    stacked._mdf.extend(dg_cntr, signal_samples)
+
+                if progress and progress.stop:
+                    return TERMINATED
+
+                for index in range(dg_cntr, len(stacked.groups)):
+                    stacked.groups[index].channel_group.comment = (
+                        f'stacked from channel group {i} of "{mdf.name.parent}"'
+                    )
 
             if progress is not None:
                 if callable(progress):
@@ -2825,15 +2913,13 @@ class MDF:
                 stacked._transfer_metadata(mdf)
 
             if not input_types[mdf_index]:
-                mdf.close()
+                mdf._mdf.close()
 
             if progress is not None and progress.stop:
                 return TERMINATED
 
-        try:
-            stacked._process_bus_logging()
-        except:
-            pass
+        if isinstance(stacked._mdf, mdf_v4.MDF4):
+            stacked._mdf._process_bus_logging()
 
         return stacked
 
@@ -2867,16 +2953,16 @@ class MDF:
             if "__default__" not in raw:
                 raise MdfException("The raw argument given as dict must contain the __default__ key")
 
-        for index in self.virtual_groups:
+        for index in self._mdf.virtual_groups:
             channels = [
                 (None, gp_index, ch_index)
-                for gp_index, channel_indexes in self.included_channels(index)[index].items()
+                for gp_index, channel_indexes in self._mdf.included_channels(index)[index].items()
                 for ch_index in channel_indexes
             ]
 
-            channels = self.select(channels, copy_master=copy_master, raw=raw)
+            signals = self.select(channels, copy_master=copy_master, raw=raw)
 
-            yield from channels
+            yield from signals
 
     def iter_groups(
         self,
@@ -2962,7 +3048,7 @@ class MDF:
 
         """
 
-        for i in self.virtual_groups:
+        for i in self._mdf.virtual_groups:
             yield self.get_group(
                 i,
                 raster=raster,
@@ -2980,10 +3066,10 @@ class MDF:
     def resample(
         self,
         raster: RasterType,
-        version: str | None = None,
+        version: Version | None = None,
         time_from_zero: bool = False,
         progress=None,
-    ) -> MDF:
+    ) -> MDF | object:
         """resample all channels using the given raster. See *configure* to select
         the interpolation method for interger channels
 
@@ -3131,22 +3217,22 @@ class MDF:
         """
 
         if version is None:
-            version = self.version
+            version = self._mdf.version
         else:
-            version = validate_version_argument(version)
+            version = validate_version_argument(version, self._mdf.default_version)
 
         mdf = MDF(
             version=version,
-            **self._kwargs,
+            **self._mdf._kwargs,
         )
 
         integer_interpolation_mode = self._integer_interpolation
         float_interpolation_mode = self._float_interpolation
         mdf.configure(from_other=self)
 
-        mdf.header.start_time = self.header.start_time
+        mdf._mdf.header.start_time = self._mdf.header.start_time
 
-        groups_nr = len(self.virtual_groups)
+        groups_nr = len(self._mdf.virtual_groups)
 
         if progress is not None:
             if callable(progress):
@@ -3159,29 +3245,29 @@ class MDF:
                     return TERMINATED
 
         try:
-            raster = float(raster)
-            assert raster > 0
+            raster_float = float(raster)
+            assert raster_float > 0
         except (TypeError, ValueError):
             if isinstance(raster, str):
-                raster = self.get(raster).timestamps
+                raster = self._mdf.get(raster).timestamps
             else:
                 raster = np.array(raster)
         else:
-            raster = master_using_raster(self, raster)
+            raster = master_using_raster(self._mdf, raster_float)
 
         if time_from_zero and len(raster):
             delta = raster[0]
             new_raster = raster - delta
-            t_epoch = self.header.start_time.timestamp() + delta
-            mdf.header.start_time = datetime.fromtimestamp(t_epoch)
+            t_epoch = self._mdf.header.start_time.timestamp() + delta
+            mdf._mdf.header.start_time = datetime.fromtimestamp(t_epoch)
         else:
             new_raster = None
-            mdf.header.start_time = self.header.start_time
+            mdf._mdf.header.start_time = self._mdf.header.start_time
 
-        for i, (group_index, virtual_group) in enumerate(self.virtual_groups.items()):
+        for i, (group_index, virtual_group) in enumerate(self._mdf.virtual_groups.items()):
             channels = [
                 (None, gp_index, ch_index)
-                for gp_index, channel_indexes in self.included_channels(group_index)[group_index].items()
+                for gp_index, channel_indexes in self._mdf.included_channels(group_index)[group_index].items()
                 for ch_index in channel_indexes
             ]
 
@@ -3204,13 +3290,13 @@ class MDF:
                     if len(sig):
                         sig.timestamps = new_raster
 
-            cg = self.groups[group_index].channel_group
-            dg_cntr = mdf.append(
+            cg = self._mdf.groups[group_index].channel_group
+            dg_cntr = mdf._mdf.append(
                 sigs,
                 common_timebase=True,
                 comment=cg.comment,
             )
-            MDF._transfer_channel_group_data(mdf.groups[dg_cntr].channel_group, cg)
+            MDF._transfer_channel_group_data(mdf._mdf.groups[dg_cntr].channel_group, cg)
 
             if progress is not None:
                 if callable(progress):
@@ -3221,7 +3307,7 @@ class MDF:
                     if progress.stop:
                         return TERMINATED
 
-        mdf._transfer_metadata(self, message=f"Resampled from {self.name}")
+        mdf._transfer_metadata(self, message=f"Resampled from {self._mdf.name}")
 
         return mdf
 
@@ -3329,11 +3415,11 @@ class MDF:
                 raise MdfException("The raw argument given as dict must contain the __default__ key")
 
             __default__ = raw["__default__"]
-            raw_dict = True
+            raw_dict = raw
         else:
-            raw_dict = False
+            raw_dict = None
 
-        virtual_groups = self.included_channels(channels=channels, minimal=False, skip_master=False)
+        virtual_groups = self._mdf.included_channels(channels=channels, minimal=False, skip_master=False)
 
         output_signals = {}
 
@@ -3351,47 +3437,54 @@ class MDF:
                 else:
                     cycles = record_count
 
-            signals = []
+            signals: list[Signal] = []
 
             current_pos = 0
 
-            for idx, sigs in enumerate(
-                self._yield_selected_signals(
-                    virtual_group,
-                    groups=groups,
-                    record_offset=record_offset,
-                    record_count=record_count,
-                )
-            ):
-                if not sigs:
-                    break
-                if idx == 0:
-                    next_pos = current_pos + len(sigs[0])
+            selected_signals = self._mdf._yield_selected_signals(
+                virtual_group,
+                groups=groups,
+                record_offset=record_offset,
+                record_count=record_count,
+            )
 
-                    master = np.empty(cycles, dtype=sigs[0].timestamps.dtype)
-                    master[current_pos:next_pos] = sigs[0].timestamps
+            sigs = typing.cast(Optional[list[Signal]], next(selected_signals, None))
 
-                    for sig in sigs:
-                        shape = (cycles,) + sig.samples.shape[1:]
-                        signal = np.empty(shape, dtype=sig.samples.dtype)
-                        signal[current_pos:next_pos] = sig.samples
-                        sig.samples = signal
-                        signals.append(sig)
+            if not sigs:
+                continue
 
-                        if sig.invalidation_bits is not None:
-                            inval = np.empty(cycles, dtype=sig.invalidation_bits.dtype)
-                            inval[current_pos:next_pos] = sig.invalidation_bits
-                            sig.invalidation_bits = inval
+            next_pos = current_pos + len(sigs[0])
 
-                else:
-                    sig, _ = sigs[0]
-                    next_pos = current_pos + len(sig)
-                    master[current_pos:next_pos] = sig
+            master = np.empty(cycles, dtype=sigs[0].timestamps.dtype)
+            master[current_pos:next_pos] = sigs[0].timestamps
 
-                    for signal, (sig, inval) in zip(signals, sigs[1:]):
-                        signal.samples[current_pos:next_pos] = sig
-                        if signal.invalidation_bits is not None:
-                            signal.invalidation_bits[current_pos:next_pos] = inval
+            for sig in sigs:
+                shape = (cycles,) + sig.samples.shape[1:]
+                samples = np.empty(shape, dtype=sig.samples.dtype)
+                samples[current_pos:next_pos] = sig.samples
+                sig.samples = samples
+                signals.append(sig)
+
+                if sig.invalidation_bits is not None:
+                    inval_samples = np.empty(cycles, dtype=sig.invalidation_bits.dtype)
+                    inval_samples[current_pos:next_pos] = sig.invalidation_bits
+                    sig.invalidation_bits = inval_samples
+
+            current_pos = next_pos
+
+            selected_samples = typing.cast(
+                Iterator[list[tuple[NDArray[Any], Optional[NDArray[Any]]]]], selected_signals
+            )
+
+            for signal_samples in selected_samples:
+                samples, _ = signal_samples[0]
+                next_pos = current_pos + len(samples)
+                master[current_pos:next_pos] = samples
+
+                for signal, (samples, inval) in zip(signals, signal_samples[1:]):
+                    signal.samples[current_pos:next_pos] = samples
+                    if signal.invalidation_bits is not None:
+                        signal.invalidation_bits[current_pos:next_pos] = inval
 
                 current_pos = next_pos
 
@@ -3402,9 +3495,16 @@ class MDF:
         indexes = []
 
         for item in channels:
+            name: str | None
             if not isinstance(item, (list, tuple)):
-                item = [item]
-            indexes.append(self._validate_channel_selection(*item))
+                name = item
+                group = index = None
+            elif len(item) == 2:
+                name, group = item
+                index = None
+            else:
+                name, group, index = item
+            indexes.append(self._mdf._validate_channel_selection(name=name, group=group, index=index))
 
         signals = [output_signals[pair] for pair in indexes]
 
@@ -3413,7 +3513,7 @@ class MDF:
                 signal.timestamps = signal.timestamps.copy()
 
         for signal in signals:
-            if (raw_dict and not raw.get(signal.name, __default__)) or (not raw_dict and not raw):
+            if (raw_dict and not raw_dict.get(signal.name, __default__)) or (not raw_dict and not raw):
                 conversion = signal.conversion
                 if conversion:
                     samples = conversion.convert(
@@ -3424,7 +3524,7 @@ class MDF:
                 signal.raw = False
                 signal.conversion = None
                 if signal.samples.dtype.kind == "S":
-                    signal.encoding = "utf-8" if self.version >= "4.00" else "latin-1"
+                    signal.encoding = "utf-8" if isinstance(self._mdf, mdf_v4.MDF4) else "latin-1"
 
         if validate:
             signals = [sig.validate(copy=False) for sig in signals]
@@ -3447,7 +3547,7 @@ class MDF:
         return signals
 
     @staticmethod
-    def scramble(name: StrPathType, skip_attachments: bool = False, progress=None, **kwargs) -> Path:
+    def scramble(name: StrPathType, skip_attachments: bool = False, progress=None, **kwargs) -> Path | object:
         """scramble text blocks and keep original file structure
 
         Parameters
@@ -3469,7 +3569,11 @@ class MDF:
         name = Path(name)
 
         mdf = MDF(name)
-        texts = {}
+
+        if not mdf._mdf._file:
+            raise RuntimeError(f"file was not openned '{name}'")
+
+        texts: dict[int, bytes] = {}
 
         if progress is not None:
             if callable(progress):
@@ -3481,18 +3585,16 @@ class MDF:
                 if progress.stop:
                     return TERMINATED
 
-        count = len(mdf.groups)
+        count = len(mdf._mdf.groups)
 
-        if mdf.version >= "4.00":
+        if isinstance(mdf._mdf, mdf_v4.MDF4):
             try:
-                ChannelConversion = ChannelConversionV4
+                stream = mdf._mdf._file
 
-                stream = mdf._file
-
-                if mdf.header.comment_addr:
-                    stream.seek(mdf.header.comment_addr + 8)
+                if mdf._mdf.header.comment_addr:
+                    stream.seek(mdf._mdf.header.comment_addr + 8)
                     size = UINT64_u(stream.read(8))[0] - 24
-                    texts[mdf.header.comment_addr] = randomized_string(size)
+                    texts[mdf._mdf.header.comment_addr] = randomized_string(size)
 
                 for fh in mdf.file_history:
                     addr = fh.comment_addr
@@ -3501,14 +3603,14 @@ class MDF:
                         size = UINT64_u(stream.read(8))[0] - 24
                         texts[addr] = randomized_string(size)
 
-                for ev in mdf.events:
+                for ev in mdf._mdf.events:
                     for addr in (ev.comment_addr, ev.name_addr):
                         if addr and addr not in texts:
                             stream.seek(addr + 8)
                             size = UINT64_u(stream.read(8))[0] - 24
                             texts[addr] = randomized_string(size)
 
-                for at in mdf.attachments:
+                for at in mdf._mdf.attachments:
                     for addr in (at.comment_addr, at.file_name_addr):
                         if addr and addr not in texts:
                             stream.seek(addr + 8)
@@ -3517,16 +3619,16 @@ class MDF:
                     if not skip_attachments and at.embedded_data:
                         texts[at.address + v4c.AT_COMMON_SIZE] = randomized_string(at.embedded_size)
 
-                for idx, gp in enumerate(mdf.groups, 1):
-                    addr = gp.data_group.comment_addr
+                for idx, gp_v4 in enumerate(mdf._mdf.groups, 1):
+                    addr = gp_v4.data_group.comment_addr
                     if addr and addr not in texts:
                         stream.seek(addr + 8)
                         size = UINT64_u(stream.read(8))[0] - 24
                         texts[addr] = randomized_string(size)
 
-                    cg = gp.channel_group
-                    for addr in (cg.acq_name_addr, cg.comment_addr):
-                        if cg.flags & v4c.FLAG_CG_BUS_EVENT:
+                    cg_v4 = gp_v4.channel_group
+                    for addr in (cg_v4.acq_name_addr, cg_v4.comment_addr):
+                        if cg_v4.flags & v4c.FLAG_CG_BUS_EVENT:
                             continue
 
                         if addr and addr not in texts:
@@ -3534,9 +3636,9 @@ class MDF:
                             size = UINT64_u(stream.read(8))[0] - 24
                             texts[addr] = randomized_string(size)
 
-                        source = cg.acq_source_addr
-                        if source:
-                            source = SourceInformation(address=source, stream=stream, mapped=False, tx_map={})
+                        address = cg_v4.acq_source_addr
+                        if address:
+                            source = SourceInformation(address=address, stream=stream, mapped=False, tx_map={})
                             for addr in (
                                 source.name_addr,
                                 source.path_addr,
@@ -3547,16 +3649,16 @@ class MDF:
                                     size = UINT64_u(stream.read(8))[0] - 24
                                     texts[addr] = randomized_string(size)
 
-                    for ch in gp.channels:
-                        for addr in (ch.name_addr, ch.unit_addr, ch.comment_addr):
+                    for ch_v4 in gp_v4.channels:
+                        for addr in (ch_v4.name_addr, ch_v4.unit_addr, ch_v4.comment_addr):
                             if addr and addr not in texts:
                                 stream.seek(addr + 8)
                                 size = UINT64_u(stream.read(8))[0] - 24
                                 texts[addr] = randomized_string(size)
 
-                        source = ch.source_addr
-                        if source:
-                            source = SourceInformation(address=source, stream=stream, mapped=False, tx_map={})
+                        address = ch_v4.source_addr
+                        if address:
+                            source = SourceInformation(address=address, stream=stream, mapped=False, tx_map={})
                             for addr in (
                                 source.name_addr,
                                 source.path_addr,
@@ -3567,36 +3669,35 @@ class MDF:
                                     size = UINT64_u(stream.read(8))[0] - 24
                                     texts[addr] = randomized_string(size)
 
-                        conv = ch.conversion_addr
-                        if conv:
-                            conv = ChannelConversion(
-                                address=conv,
+                        address = ch_v4.conversion_addr
+                        if address:
+                            conv_v4 = ChannelConversionV4(
+                                address=address,
                                 stream=stream,
                                 mapped=False,
                                 tx_map={},
-                                si_map={},
                             )
                             for addr in (
-                                conv.name_addr,
-                                conv.unit_addr,
-                                conv.comment_addr,
+                                conv_v4.name_addr,
+                                conv_v4.unit_addr,
+                                conv_v4.comment_addr,
                             ):
                                 if addr and addr not in texts:
                                     stream.seek(addr + 8)
                                     size = UINT64_u(stream.read(8))[0] - 24
                                     texts[addr] = randomized_string(size)
-                            if conv.conversion_type == v4c.CONVERSION_TYPE_ALG:
-                                addr = conv.formula_addr
+                            if conv_v4.conversion_type == v4c.CONVERSION_TYPE_ALG:
+                                addr = conv_v4.formula_addr
                                 if addr and addr not in texts:
                                     stream.seek(addr + 8)
                                     size = UINT64_u(stream.read(8))[0] - 24
                                     texts[addr] = randomized_string(size)
 
-                            if conv.referenced_blocks:
-                                for key, block in conv.referenced_blocks.items():
+                            if conv_v4.referenced_blocks:
+                                for key, block in conv_v4.referenced_blocks.items():
                                     if block:
                                         if isinstance(block, bytes):
-                                            addr = conv[key]
+                                            addr = conv_v4[key]
                                             if addr not in texts:
                                                 stream.seek(addr + 8)
                                                 size = len(block)
@@ -3615,19 +3716,19 @@ class MDF:
                 print(f"Error while scrambling the file: {format_exc()}.\nWill now use fallback method")
                 texts = MDF._fallback_scramble_mf4(name)
 
-            mdf.close()
+            mdf._mdf.close()
 
             dst = name.with_suffix(".scrambled.mf4")
 
             copy(name, dst)
 
-            with open(dst, "rb+") as mdf:
+            with open(dst, "rb+") as fp:
                 count = len(texts)
                 chunk = max(count // 34, 1)
                 idx = 0
                 for index, (addr, bts) in enumerate(texts.items()):
-                    mdf.seek(addr + 24)
-                    mdf.write(bts)
+                    fp.seek(addr + 24)
+                    fp.write(bts)
                     if index % chunk == 0:
                         if progress is not None:
                             if callable(progress):
@@ -3639,20 +3740,18 @@ class MDF:
                                     return TERMINATED
 
         else:
-            ChannelConversion = ChannelConversionV3
+            stream = mdf._mdf._file
 
-            stream = mdf._file
-
-            if mdf.header.comment_addr:
-                stream.seek(mdf.header.comment_addr + 2)
+            if mdf._mdf.header.comment_addr:
+                stream.seek(mdf._mdf.header.comment_addr + 2)
                 size = UINT16_u(stream.read(2))[0] - 4
-                texts[mdf.header.comment_addr + 4] = randomized_string(size)
+                texts[mdf._mdf.header.comment_addr + 4] = randomized_string(size)
             texts[36 + 0x40] = randomized_string(32)
             texts[68 + 0x40] = randomized_string(32)
             texts[100 + 0x40] = randomized_string(32)
             texts[132 + 0x40] = randomized_string(32)
 
-            for idx, gp in enumerate(mdf.groups, 1):
+            for idx, gp in enumerate(mdf._mdf.groups, 1):
                 cg = gp.channel_group
                 addr = cg.comment_addr
 
@@ -3682,24 +3781,24 @@ class MDF:
                     texts[ch.address + 26] = randomized_string(32)
                     texts[ch.address + 58] = randomized_string(128)
 
-                    source = ch.source_addr
-                    if source:
-                        source = ChannelExtension(address=source, stream=stream)
-                        if source.type == v23c.SOURCE_ECU:
-                            texts[source.address + 12] = randomized_string(80)
-                            texts[source.address + 92] = randomized_string(32)
+                    address = ch.source_addr
+                    if address:
+                        extension = ChannelExtension(address=address, stream=stream)
+                        if extension.type == v23c.SOURCE_ECU:
+                            texts[extension.address + 12] = randomized_string(80)
+                            texts[extension.address + 92] = randomized_string(32)
                         else:
-                            texts[source.address + 14] = randomized_string(36)
-                            texts[source.address + 50] = randomized_string(36)
+                            texts[extension.address + 14] = randomized_string(36)
+                            texts[extension.address + 50] = randomized_string(36)
 
-                    conv = ch.conversion_addr
-                    if conv:
-                        texts[conv + 22] = randomized_string(20)
+                    address = ch.conversion_addr
+                    if address:
+                        texts[address + 22] = randomized_string(20)
 
-                        conv = ChannelConversion(address=conv, stream=stream)
+                        conv = ChannelConversionV3(address=address, stream=stream)
 
                         if conv.conversion_type == v23c.CONVERSION_TYPE_FORMULA:
-                            texts[conv + 36] = randomized_string(conv.block_len - 36)
+                            texts[conv.address + 36] = randomized_string(conv.block_len - 36)
 
                         if conv.referenced_blocks:
                             for key, block in conv.referenced_blocks.items():
@@ -3720,18 +3819,18 @@ class MDF:
                         if progress.stop:
                             return TERMINATED
 
-            mdf.close()
+            mdf._mdf.close()
 
             dst = name.with_suffix(".scrambled.mdf")
 
             copy(name, dst)
 
-            with open(dst, "rb+") as mdf:
+            with open(dst, "rb+") as fp:
                 chunk = count // 34
                 idx = 0
                 for index, (addr, bts) in enumerate(texts.items()):
-                    mdf.seek(addr)
-                    mdf.write(bts)
+                    fp.seek(addr)
+                    fp.write(bts)
                     if chunk and index % chunk == 0:
                         if progress is not None:
                             if callable(progress):
@@ -3876,7 +3975,7 @@ class MDF:
 
         channels = [
             (None, gp_index, ch_index)
-            for gp_index, channel_indexes in self.included_channels(index)[index].items()
+            for gp_index, channel_indexes in self._mdf.included_channels(index)[index].items()
             for ch_index in channel_indexes
         ]
 
@@ -4001,9 +4100,9 @@ class MDF:
                 raise MdfException("The raw argument given as dict must contain the __default__ key")
 
             __default__ = raw["__default__"]
-            raw_dict = True
+            raw_dict = raw
         else:
-            raw_dict = False
+            raw_dict = None
 
         if channels:
             mdf = self.filter(channels)
@@ -4028,13 +4127,13 @@ class MDF:
             for df in result:
                 yield df
 
-            mdf.close()
+            mdf._mdf.close()
         else:
             # channels is None
 
-            self._set_temporary_master(None)
+            self._mdf._set_temporary_master(None)
 
-            masters = {index: self.get_master(index) for index in self.virtual_groups}
+            masters = {index: self._mdf.get_master(index) for index in self._mdf.virtual_groups}
 
             if raster is not None:
                 try:
@@ -4042,12 +4141,11 @@ class MDF:
                     assert raster > 0
                 except (TypeError, ValueError):
                     if isinstance(raster, str):
-                        raster = self.get(raster, raw=True, ignore_invalidation_bits=True).timestamps
+                        master = self._mdf.get(raster, raw=True, ignore_invalidation_bits=True).timestamps
                     else:
-                        raster = np.array(raster)
+                        master = np.array(raster)
                 else:
-                    raster = master_using_raster(self, raster)
-                master = raster
+                    master = master_using_raster(self._mdf, raster)
             else:
                 if masters:
                     master = reduce(np.union1d, masters.values())
@@ -4057,7 +4155,7 @@ class MDF:
             master_ = master
             if time_from_zero and len(master_):
                 master_ -= master_[0]
-            channel_count = sum(len(gp.channels) - 1 for gp in self.groups) + 1
+            channel_count = sum(len(gp.channels) - 1 for gp in self._mdf.groups) + 1
             # approximation with all float64 dtype
             itemsize = channel_count * 8
             # use 200MB DataFrame chunks
@@ -4072,13 +4170,13 @@ class MDF:
                 start = master[0]
                 end = master[-1]
 
-                df = {}
-                self._set_temporary_master(None)
+                data: dict[str, pd.Series] = {}
+                self._mdf._set_temporary_master(None)
 
                 used_names = UniqueDB()
                 used_names.get_unique_name("timestamps")
 
-                groups_nr = len(self.virtual_groups)
+                groups_nr = len(self._mdf.virtual_groups)
 
                 if progress is not None:
                     if callable(progress):
@@ -4087,7 +4185,7 @@ class MDF:
                         progress.signals.setValue.emit(0)
                         progress.signals.setMaximum.emit(groups_nr)
 
-                for group_index, virtual_group in self.virtual_groups.items():
+                for group_index, virtual_group in self._mdf.virtual_groups.items():
                     group_cycles = virtual_group.cycles_nr
                     if group_cycles == 0 and empty_channels == "skip":
                         continue
@@ -4098,7 +4196,7 @@ class MDF:
 
                     channels = [
                         (None, gp_index, ch_index)
-                        for gp_index, channel_indexes in self.included_channels(group_index)[group_index].items()
+                        for gp_index, channel_indexes in self._mdf.included_channels(group_index)[group_index].items()
                         for ch_index in channel_indexes
                     ]
                     signals = self.select(
@@ -4125,7 +4223,7 @@ class MDF:
                                 sig.timestamps = master if virtual_group.cycles_nr == 0 else group_master
 
                     for signal in signals:
-                        if (raw_dict and not raw.get(signal.name, __default__)) or (not raw_dict and not raw):
+                        if (raw_dict and not raw_dict.get(signal.name, __default__)) or (not raw_dict and not raw):
                             conversion = signal.conversion
                             if conversion:
                                 samples = conversion.convert(
@@ -4136,7 +4234,7 @@ class MDF:
                             signal.raw = False
                             signal.conversion = None
                             if signal.samples.dtype.kind == "S":
-                                signal.encoding = "utf-8" if self.version >= "4.00" else "latin-1"
+                                signal.encoding = "utf-8" if isinstance(self._mdf, mdf_v4.MDF4) else "latin-1"
 
                     for s_index, sig in enumerate(signals):
                         sig = sig.validate(copy=False)
@@ -4219,7 +4317,7 @@ class MDF:
                             if sig.samples.dtype.byteorder not in target_byte_order:
                                 sig.samples = sig.samples.byteswap().view(sig.samples.dtype.newbyteorder())
 
-                            df[channel_name] = pd.Series(
+                            data[channel_name] = pd.Series(
                                 list(sig.samples),
                                 index=sig_index,
                             )
@@ -4233,7 +4331,7 @@ class MDF:
                                 master=sig_index,
                                 only_basenames=only_basenames,
                             ):
-                                df[name] = series
+                                data[name] = series
 
                         # scalars
                         else:
@@ -4251,13 +4349,13 @@ class MDF:
                                     sig.samples = sig.samples.byteswap().view(sig.samples.dtype.newbyteorder())
 
                                 if len(sig.samples) / len(unique) >= 2:
-                                    df[channel_name] = pd.Series(
+                                    data[channel_name] = pd.Series(
                                         sig.samples,
                                         index=sig_index,
                                         dtype="category",
                                     )
                                 else:
-                                    df[channel_name] = pd.Series(
+                                    data[channel_name] = pd.Series(
                                         sig.samples,
                                         index=sig_index,
                                     )
@@ -4268,7 +4366,7 @@ class MDF:
                                 if sig.samples.dtype.byteorder not in target_byte_order:
                                     sig.samples = sig.samples.byteswap().view(sig.samples.dtype.newbyteorder())
 
-                                df[channel_name] = pd.Series(
+                                data[channel_name] = pd.Series(
                                     sig.samples,
                                     index=sig_index,
                                 )
@@ -4281,7 +4379,7 @@ class MDF:
 
                 strings, nonstrings = {}, {}
 
-                for col, series in df.items():
+                for col, series in data.items():
                     if series.dtype.kind == "S":
                         strings[col] = series
                     else:
@@ -4302,10 +4400,51 @@ class MDF:
                 if time_as_date:
                     delta = pd.to_timedelta(df.index, unit="s")
 
-                    new_index = self.header.start_time + delta
+                    new_index = self._mdf.header.start_time + delta
                     df.set_index(new_index, inplace=True)
 
                 yield df
+
+    @overload
+    def to_dataframe(
+        self,
+        channels: ChannelsType | None = ...,
+        raster: RasterType | None = ...,
+        time_from_zero: bool = ...,
+        empty_channels: EmptyChannelsType = ...,
+        keep_arrays: bool = ...,
+        use_display_names: bool = ...,
+        time_as_date: bool = ...,
+        reduce_memory_usage: bool = ...,
+        raw: bool | dict[str, bool] = ...,
+        ignore_value2text_conversions: bool = ...,
+        use_interpolation: bool = ...,
+        only_basenames: bool = ...,
+        interpolate_outwards_with_nan: bool = ...,
+        numeric_1D_only: bool = ...,
+        progress: None = ...,
+    ) -> pd.DataFrame: ...
+
+    @overload
+    def to_dataframe(
+        self,
+        channels: ChannelsType | None = ...,
+        raster: RasterType | None = ...,
+        time_from_zero: bool = ...,
+        empty_channels: EmptyChannelsType = ...,
+        keep_arrays: bool = ...,
+        use_display_names: bool = ...,
+        time_as_date: bool = ...,
+        reduce_memory_usage: bool = ...,
+        raw: bool | dict[str, bool] = ...,
+        ignore_value2text_conversions: bool = ...,
+        use_interpolation: bool = ...,
+        only_basenames: bool = ...,
+        interpolate_outwards_with_nan: bool = ...,
+        numeric_1D_only: bool = ...,
+        *,
+        progress: Callable[[int, int], None] | Any,
+    ) -> pd.DataFrame | object: ...
 
     def to_dataframe(
         self,
@@ -4323,8 +4462,8 @@ class MDF:
         only_basenames: bool = False,
         interpolate_outwards_with_nan: bool = False,
         numeric_1D_only: bool = False,
-        progress=None,
-    ) -> pd.DataFrame:
+        progress: Callable[[int, int], None] | Any | None = None,
+    ) -> pd.DataFrame | object:
         """generate pandas DataFrame
 
         Parameters
@@ -4414,9 +4553,9 @@ class MDF:
                 raise MdfException("The raw argument given as dict must contain the __default__ key")
 
             __default__ = raw["__default__"]
-            raw_dict = True
+            raw_dict = raw
         else:
-            raw_dict = False
+            raw_dict = None
 
         if channels is not None:
             mdf = self.filter(channels)
@@ -4437,34 +4576,33 @@ class MDF:
                 numeric_1D_only=numeric_1D_only,
             )
 
-            mdf.close()
+            mdf._mdf.close()
             return result
 
         target_byte_order = "<=" if sys.byteorder == "little" else ">="
 
-        df = {}
+        data = {}
 
-        self._set_temporary_master(None)
+        self._mdf._set_temporary_master(None)
 
         if raster is not None:
             try:
-                raster = float(raster)
-                assert raster > 0
+                raster_float = float(raster)
+                assert raster_float > 0
             except (TypeError, ValueError):
                 if isinstance(raster, str):
-                    raster = self.get(raster).timestamps
+                    master = self._mdf.get(raster).timestamps
                 else:
-                    raster = np.array(raster)
+                    master = np.array(raster)
             else:
-                raster = master_using_raster(self, raster)
-            master = raster
+                master = master_using_raster(self._mdf, raster_float)
         else:
-            masters = {index: self.get_master(index) for index in self.virtual_groups}
+            masters = {index: self._mdf.get_master(index) for index in self._mdf.virtual_groups}
 
             if masters:
                 master = reduce(np.union1d, masters.values())
             else:
-                master = np.array([], dtype="<f4")
+                master = np.array([], dtype=np.dtype("<f4"))
 
             del masters
 
@@ -4474,7 +4612,7 @@ class MDF:
         used_names = UniqueDB()
         used_names.get_unique_name("timestamps")
 
-        groups_nr = len(self.virtual_groups)
+        groups_nr = len(self._mdf.virtual_groups)
 
         if progress is not None:
             if callable(progress):
@@ -4486,17 +4624,17 @@ class MDF:
                 if progress.stop:
                     return TERMINATED
 
-        for group_index, (virtual_group_index, virtual_group) in enumerate(self.virtual_groups.items()):
+        for group_index, (virtual_group_index, virtual_group) in enumerate(self._mdf.virtual_groups.items()):
             if virtual_group.cycles_nr == 0 and empty_channels == "skip":
                 continue
 
             channels = [
                 (None, gp_index, ch_index)
-                for gp_index, channel_indexes in self.included_channels(virtual_group_index)[
+                for gp_index, channel_indexes in self._mdf.included_channels(virtual_group_index)[
                     virtual_group_index
                 ].items()
                 for ch_index in channel_indexes
-                if ch_index != self.masters_db.get(gp_index, None)
+                if ch_index != self._mdf.masters_db.get(gp_index, None)
             ]
 
             signals = self.select(channels, raw=True, copy_master=False, validate=False)
@@ -4516,7 +4654,7 @@ class MDF:
                         sig.timestamps = master if virtual_group.cycles_nr == 0 else group_master
 
             for signal in signals:
-                if (raw_dict and not raw.get(signal.name, __default__)) or (not raw_dict and not raw):
+                if (raw_dict and not raw_dict.get(signal.name, __default__)) or (not raw_dict and not raw):
                     conversion = signal.conversion
                     if conversion:
                         samples = conversion.convert(
@@ -4527,7 +4665,7 @@ class MDF:
                     signal.raw = False
                     signal.conversion = None
                     if signal.samples.dtype.kind == "S":
-                        signal.encoding = "utf-8" if self.version >= "4.00" else "latin-1"
+                        signal.encoding = "utf-8" if isinstance(self._mdf, mdf_v4.MDF4) else "latin-1"
 
             for s_index, sig in enumerate(signals):
                 sig = sig.validate(copy=False)
@@ -4612,7 +4750,7 @@ class MDF:
                     if sig.samples.dtype.byteorder not in target_byte_order:
                         sig.samples = sig.samples.byteswap().view(sig.samples.dtype.newbyteorder())
 
-                    df[channel_name] = pd.Series(
+                    data[channel_name] = pd.Series(
                         list(sig.samples),
                         index=sig_index,
                     )
@@ -4626,7 +4764,7 @@ class MDF:
                         master=sig_index,
                         only_basenames=only_basenames,
                     ):
-                        df[name] = series
+                        data[name] = series
 
                 # scalars
                 else:
@@ -4644,7 +4782,7 @@ class MDF:
                     if sig.samples.dtype.byteorder not in target_byte_order:
                         sig.samples = sig.samples.byteswap().view(sig.samples.dtype.newbyteorder())
 
-                    df[channel_name] = pd.Series(sig.samples, index=sig_index)
+                    data[channel_name] = pd.Series(sig.samples, index=sig_index)
 
             if progress is not None:
                 if callable(progress):
@@ -4657,7 +4795,7 @@ class MDF:
 
         strings, nonstrings = {}, {}
 
-        for col, series in df.items():
+        for col, series in data.items():
             if series.dtype.kind == "S":
                 strings[col] = series
             else:
@@ -4678,7 +4816,7 @@ class MDF:
         if time_as_date:
             delta = pd.to_timedelta(df.index, unit="s")
 
-            new_index = self.header.start_time + delta
+            new_index = self._mdf.header.start_time + delta
             df.set_index(new_index, inplace=True)
 
         elif time_from_zero and len(master):
@@ -4689,13 +4827,13 @@ class MDF:
     def extract_bus_logging(
         self,
         database_files: dict[BusType, Iterable[DbcFileType]],
-        version: str | None = None,
+        version: Version | None = None,
         ignore_invalid_signals: bool | None = None,
         consolidated_j1939: bool | None = None,
         ignore_value2text_conversion: bool = True,
         prefix: str = "",
         progress=None,
-    ) -> MDF:
+    ) -> MDF | object:
         """extract all possible CAN signal using the provided databases.
 
         Changed in version 6.0.0 from `extract_can_logging`
@@ -4767,6 +4905,9 @@ class MDF:
         >>> extracted = mdf.extract_bus_logging(database_files=database_files)
 
         """
+        if not isinstance(self._mdf, mdf_v4.MDF4):
+            raise MdfException("The method `extract_bus_logging` is only available for MDF4 files")
+
         if ignore_invalid_signals is not None:
             warn(
                 "The argument `ignore_invalid_signals` from the method `extract_bus_logging` is no longer used and will be removed in the future",
@@ -4780,52 +4921,72 @@ class MDF:
             )
 
         if version is None:
-            version = self.version
+            version = self._mdf.version
         else:
-            version = validate_version_argument(version)
+            version = validate_version_argument(version, self._mdf.default_version)
 
         out = MDF(
             version=version,
-            password=self._password,
+            password=self._mdf._password,
             use_display_names=True,
         )
-        out.header.start_time = self.header.start_time
 
-        self.last_call_info = {}
+        if not isinstance(out._mdf, mdf_v4.MDF4):
+            raise MdfException("The method `extract_bus_logging` is only available for MDF4 files")
+
+        out._mdf.header.start_time = self._mdf.header.start_time
+
+        self._mdf.last_call_info = {}
 
         if database_files.get("CAN", None):
-            out = self._extract_can_logging(
-                out,
+            to_keep_or_terminated = self._extract_can_logging(
+                out._mdf,
                 database_files["CAN"],
                 ignore_value2text_conversion,
                 prefix,
                 progress=progress,
             )
 
+            if isinstance(to_keep_or_terminated, list):
+                if to_keep_or_terminated:
+                    tmp = out.filter(to_keep_or_terminated, out._mdf.version)
+                    out._mdf.close()
+                    out = tmp
+
+                    if not out._mdf.groups:
+                        logger.warning(
+                            f'No CAN signals could be extracted from "{self._mdf.name}". The'
+                            "output file will be empty."
+                        )
+                else:
+                    terminated = None
+            else:
+                terminated = to_keep_or_terminated
+
         if database_files.get("LIN", None):
-            out = self._extract_lin_logging(
-                out,
+            terminated = self._extract_lin_logging(
+                out._mdf,
                 database_files["LIN"],
                 ignore_value2text_conversion,
                 prefix,
                 progress=progress,
             )
 
-        return out
+        return terminated if terminated else out
 
     def _extract_can_logging(
         self,
-        output_file: MDF,
+        output_file: mdf_v4.MDF4,
         dbc_files: Iterable[DbcFileType],
         ignore_value2text_conversion: bool = True,
         prefix: str = "",
         progress=None,
-    ) -> MDF:
+    ) -> list[tuple[None, int, int]] | object | None:
         out = output_file
 
-        max_flags = []
+        max_flags: list[list[list[bool | np.bool_]]] = []
 
-        valid_dbc_files = []
+        valid_dbc_files: list[tuple[CanMatrix, StrPathType, int]] = []
         unique_name = UniqueDB()
         for dbc_name, bus_channel in dbc_files:
             if isinstance(dbc_name, CanMatrix):
@@ -4863,15 +5024,18 @@ class MDF:
 
         cntr = 0
 
-        total_unique_ids = set()
-        found_ids = defaultdict(set)
-        not_found_ids = defaultdict(list)
-        unknown_ids = defaultdict(list)
+        total_unique_ids: set[tuple[int, bool]] = set()
+        found_ids: defaultdict[StrPathType, set[tuple[tuple[int, int, bool], str]]] = defaultdict(set)
+        not_found_ids: defaultdict[StrPathType, list[tuple[tuple[int, bool] | int, str]]] = defaultdict(list)
+        unknown_ids_dict: defaultdict[int | tuple[int, bool], list[bool]] = defaultdict(list)
 
         for dbc, dbc_name, bus_channel in valid_dbc_files:
-            messages = {(message.arbitration_id.id, message.arbitration_id.extended): message for message in dbc}
+            messages: dict[tuple[int, bool], Frame] = {
+                (message.arbitration_id.id, message.arbitration_id.extended): message for message in dbc
+            }
 
-            global_is_j1939 = dbc.attributes.get("ProtocolType", "").lower() == "j1939"
+            protocol_type: str = dbc.attributes.get("ProtocolType", "")
+            global_is_j1939 = protocol_type.lower() == "j1939"
             not_extended = [msg for msg in dbc if not msg.arbitration_id.extended]
             if global_is_j1939 and not_extended:
                 logger.warning(
@@ -4890,7 +5054,7 @@ class MDF:
                 if message.is_j1939 or global_is_j1939
             }
 
-            current_not_found = {
+            current_not_found: set[tuple[tuple[int, bool] | int, str]] = {
                 (
                     (
                         (message.arbitration_id.id, message.arbitration_id.extended)
@@ -4958,7 +5122,7 @@ class MDF:
                         j1939_msg_pgns = np.where(pf >= 240, _pgn + ps, _pgn)
                         j9193_msg_sa = bus_msg_ids & 0xFF
 
-                        unique_ids = set(zip(bus_msg_ids.tolist(), bus_msg_ide.tolist()))
+                        unique_ids: set[tuple[int, bool]] = set(zip(bus_msg_ids.tolist(), bus_msg_ide.tolist()))
 
                         total_unique_ids = total_unique_ids | set(unique_ids)
 
@@ -4977,13 +5141,13 @@ class MDF:
                                         message = _msg
                                         break
                                 else:
-                                    unknown_ids[msg_id].append(True)
+                                    unknown_ids_dict[msg_id].append(True)
                                     continue
 
                             is_j1939 = message.is_j1939 or global_is_j1939
                             if is_j1939:
                                 source_address = msg_id & 0xFF
-                                pgn_number = message.arbitration_id.pgn
+                                pgn_number: int = message.arbitration_id.pgn
                                 key = (pgn_number, source_address, True)
                                 found_ids[dbc_name].add((key, message.name))
 
@@ -5001,7 +5165,7 @@ class MDF:
                                 except KeyError:
                                     pass
 
-                            unknown_ids[(msg_id, is_extended)].append(False)
+                            unknown_ids_dict[(msg_id, is_extended)].append(False)
 
                             if is_j1939:
                                 idx = np.argwhere(
@@ -5115,10 +5279,10 @@ class MDF:
                                 else:
                                     index = msg_map[entry]
 
-                                    sigs = []
+                                    signal_samples: list[tuple[NDArray[Any], NDArray[Any] | None]] = []
 
                                     for name_, signal in signals.items():
-                                        sigs.append(
+                                        signal_samples.append(
                                             (
                                                 signal["samples"],
                                                 signal["invalidation_bits"],
@@ -5128,12 +5292,17 @@ class MDF:
                                         t = signal["t"]
 
                                     if is_j1939:
-                                        for ch_index, sig in enumerate(sigs, 1):
-                                            max_flags[index][ch_index].append(np.all(sig[1]))
+                                        signal_samples_and_invalidation_bits = typing.cast(
+                                            list[tuple[NDArray[Any], NDArray[Any]]], signal_samples
+                                        )
+                                        for ch_index, (_, invalidation_bits) in enumerate(
+                                            signal_samples_and_invalidation_bits, 1
+                                        ):
+                                            max_flags[index][ch_index].append(np.all(invalidation_bits))
 
-                                    sigs.insert(0, (t, None))
+                                    signal_samples.insert(0, (t, None))
 
-                                    out.extend(index, sigs)
+                                    out.extend(index, signal_samples)
                     self._set_temporary_master(None)
 
                 cntr += 1
@@ -5149,7 +5318,7 @@ class MDF:
             if current_not_found:
                 not_found_ids[dbc_name] = list(current_not_found)
 
-        unknown_ids = {msg_id for msg_id, not_found in unknown_ids.items() if all(not_found)}
+        unknown_ids = {msg_id for msg_id, not_found in unknown_ids_dict.items() if all(not_found)}
 
         self.last_call_info["CAN"] = {
             "dbc_files": dbc_files,
@@ -5170,28 +5339,21 @@ class MDF:
                 all_channels.append((None, i, j))
 
         if to_keep != all_channels:
-            tmp = out.filter(to_keep, out.version)
-            out.close()
-            out = tmp
+            return to_keep
 
-        if not out.groups:
-            logger.warning(f'No CAN signals could be extracted from "{self.name}". The' "output file will be empty.")
-
-        return out
+        return None
 
     def _extract_lin_logging(
         self,
-        output_file: MDF,
+        output_file: mdf_v4.MDF4,
         dbc_files: Iterable[DbcFileType],
         ignore_value2text_conversion: bool = True,
         prefix: str = "",
         progress=None,
-    ) -> MDF:
+    ) -> object | None:
         out = output_file
 
-        max_flags = []
-
-        valid_dbc_files = []
+        valid_dbc_files: list[tuple[CanMatrix, StrPathType, int]] = []
         unique_name = UniqueDB()
         for dbc_name, bus_channel in dbc_files:
             if isinstance(dbc_name, CanMatrix):
@@ -5229,13 +5391,13 @@ class MDF:
 
         cntr = 0
 
-        total_unique_ids = set()
-        found_ids = defaultdict(set)
-        not_found_ids = defaultdict(list)
-        unknown_ids = defaultdict(list)
+        total_unique_ids: set[tuple[int, ...]] = set()
+        found_ids: defaultdict[StrPathType, set[tuple[int, str]]] = defaultdict(set)
+        not_found_ids: defaultdict[StrPathType, list[tuple[int, str]]] = defaultdict(list)
+        unknown_ids_dict: defaultdict[int, list[bool]] = defaultdict(list)
 
         for dbc, dbc_name, bus_channel in valid_dbc_files:
-            messages = {message.arbitration_id.id: message for message in dbc}
+            messages: dict[int, Frame] = {message.arbitration_id.id: message for message in dbc}
 
             current_not_found_ids = {(msg_id, message.name) for msg_id, message in messages.items()}
 
@@ -5295,7 +5457,7 @@ class MDF:
                             original_msg_id = int(msg_id_record[1])
                             message = messages.get(msg_id, None)
                             if message is None:
-                                unknown_ids[msg_id].append(True)
+                                unknown_ids_dict[msg_id].append(True)
                                 continue
 
                             found_ids[dbc_name].add(((msg_id, False, False), message.name))
@@ -5304,7 +5466,7 @@ class MDF:
                             except KeyError:
                                 pass
 
-                            unknown_ids[msg_id].append(False)
+                            unknown_ids_dict[msg_id].append(False)
 
                             idx = np.argwhere(bus_msg_ids == msg_id).ravel()
                             payload = bus_data_bytes[idx]
@@ -5325,7 +5487,7 @@ class MDF:
                                 if len(next(iter(signals.values()))["samples"]) == 0:
                                     continue
                                 if entry not in msg_map:
-                                    sigs = []
+                                    sigs: list[Signal] = []
 
                                     index = len(out.groups)
                                     msg_map[entry] = index
@@ -5385,10 +5547,10 @@ class MDF:
                                 else:
                                     index = msg_map[entry]
 
-                                    sigs = []
+                                    signal_samples: list[tuple[NDArray[Any], NDArray[Any] | None]] = []
 
                                     for name_, signal in signals.items():
-                                        sigs.append(
+                                        signal_samples.append(
                                             (
                                                 signal["samples"],
                                                 signal["invalidation_bits"],
@@ -5397,9 +5559,9 @@ class MDF:
 
                                         t = signal["t"]
 
-                                    sigs.insert(0, (t, None))
+                                    signal_samples.insert(0, (t, None))
 
-                                    out.extend(index, sigs)
+                                    out.extend(index, signal_samples)
                     self._set_temporary_master(None)
 
                 cntr += 1
@@ -5415,7 +5577,7 @@ class MDF:
             if current_not_found_ids:
                 not_found_ids[dbc_name] = list(current_not_found_ids)
 
-        unknown_ids = {msg_id for msg_id, not_found in unknown_ids.items() if all(not_found)}
+        unknown_ids = {msg_id for msg_id, not_found in unknown_ids_dict.items() if all(not_found)}
 
         self.last_call_info["LIN"] = {
             "dbc_files": dbc_files,
@@ -5429,7 +5591,7 @@ class MDF:
         if not out.groups:
             logger.warning(f'No LIN signals could be extracted from "{self.name}". The' "output file will be empty.")
 
-        return out
+        return None
 
     @property
     def start_time(self) -> datetime:
@@ -5442,11 +5604,11 @@ class MDF:
 
         """
 
-        return self.header.start_time
+        return self._mdf.header.start_time
 
     @start_time.setter
     def start_time(self, timestamp: datetime) -> None:
-        self.header.start_time = timestamp
+        self._mdf.header.start_time = timestamp
 
     def cleanup_timestamps(
         self,
@@ -5454,9 +5616,9 @@ class MDF:
         maximum: float,
         exp_min: int = -15,
         exp_max: int = 15,
-        version: str | None = None,
+        version: Version | None = None,
         progress=None,
-    ) -> MDF:
+    ) -> MDF | object:
         """convert *MDF* to other version
 
         .. versionadded:: 5.22.0
@@ -5484,15 +5646,15 @@ class MDF:
         """
 
         if version is None:
-            version = self.version
+            version = self._mdf.version
         else:
-            version = validate_version_argument(version)
+            version = validate_version_argument(version, self._mdf.default_version)
 
         out = MDF(version=version)
 
-        out.header.start_time = self.header.start_time
+        out._mdf.header.start_time = self._mdf.header.start_time
 
-        groups_nr = len(self.virtual_groups)
+        groups_nr = len(self._mdf.virtual_groups)
 
         if progress is not None:
             if callable(progress):
@@ -5509,46 +5671,49 @@ class MDF:
         self.configure(copy_on_get=False)
 
         # walk through all groups and get all channels
-        for i, virtual_group in enumerate(self.virtual_groups):
-            for idx, sigs in enumerate(self._yield_selected_signals(virtual_group, version=version)):
-                if idx == 0:
-                    if sigs:
-                        t = sigs[0].timestamps
+        for i, virtual_group in enumerate(self._mdf.virtual_groups):
+            selected_signals = self._mdf._yield_selected_signals(virtual_group, version=version)
+            sigs = typing.cast(Optional[list[Signal]], next(selected_signals, None))
+            if sigs:
+                t = sigs[0].timestamps
+                if len(t):
+                    all_ok, indexes = plausible_timestamps(t, minimum, maximum, exp_min, exp_max)
+                    if not all_ok:
+                        t = t[indexes]
                         if len(t):
-                            all_ok, idx = plausible_timestamps(t, minimum, maximum, exp_min, exp_max)
-                            if not all_ok:
-                                t = t[idx]
-                                if len(t):
-                                    for sig in sigs:
-                                        sig.samples = sig.samples[idx]
-                                        sig.timestamps = t
-                                        if sig.invalidation_bits is not None:
-                                            sig.invalidation_bits = sig.invalidation_bits[idx]
-                        cg = self.groups[virtual_group].channel_group
-                        cg_nr = out.append(
-                            sigs,
-                            acq_name=getattr(cg, "acq_name", None),
-                            acq_source=getattr(cg, "acq_source", None),
-                            comment=f"Timestamps cleaned up and converted from {self.version} to {version}",
-                            common_timebase=True,
-                        )
-                    else:
-                        break
-                else:
-                    t, _ = sigs[0]
-                    if len(t):
-                        all_ok, idx = plausible_timestamps(t, minimum, maximum, exp_min, exp_max)
-                        if not all_ok:
-                            t = t[idx]
-                            if len(t):
-                                for i, (samples, invalidation_bits) in enumerate(sigs):
-                                    if invalidation_bits is not None:
-                                        invalidation_bits = invalidation_bits[idx]
-                                    samples = samples[idx]
+                            for sig in sigs:
+                                sig.samples = sig.samples[indexes]
+                                sig.timestamps = t
+                                if sig.invalidation_bits is not None:
+                                    sig.invalidation_bits = sig.invalidation_bits[indexes]
+                cg = self._mdf.groups[virtual_group].channel_group
+                cg_nr = out._mdf.append(
+                    sigs,
+                    acq_name=getattr(cg, "acq_name", None),
+                    acq_source=getattr(cg, "acq_source", None),
+                    comment=f"Timestamps cleaned up and converted from {self._mdf.version} to {version}",
+                    common_timebase=True,
+                )
+            else:
+                continue
+            selected_samples = typing.cast(
+                Iterator[list[tuple[NDArray[Any], Optional[NDArray[Any]]]]], selected_signals
+            )
+            for signal_samples in selected_samples:
+                t, _ = signal_samples[0]
+                if len(t):
+                    all_ok, indexes = plausible_timestamps(t, minimum, maximum, exp_min, exp_max)
+                    if not all_ok:
+                        t = t[indexes]
+                        if len(t):
+                            for i, (samples, invalidation_bits) in enumerate(signal_samples):
+                                if invalidation_bits is not None:
+                                    invalidation_bits = invalidation_bits[indexes]
+                                samples = samples[indexes]
 
-                                    sigs[i] = (samples, invalidation_bits)
+                                signal_samples[i] = (samples, invalidation_bits)
 
-                    out.extend(cg_nr, sigs)
+                out._mdf.extend(cg_nr, signal_samples)
 
             if progress is not None:
                 if callable(progress):
@@ -5600,8 +5765,8 @@ class MDF:
         ()
         """
         occurrences = tuple(
-            self._filter_occurrences(
-                self.channels_db.get(channel, []),
+            self._mdf._filter_occurrences(
+                self._mdf.channels_db.get(channel, []),
                 source_name=source_name,
                 source_path=source_path,
                 acq_name=acq_name,
@@ -5655,13 +5820,13 @@ class MDF:
         if search_mode is SearchMode.plain:
             if case_insensitive:
                 pattern = pattern.casefold()
-                channels = [name for name in self.channels_db if pattern in name.casefold()]
+                channels = [name for name in self._mdf.channels_db if pattern in name.casefold()]
             else:
-                channels = [name for name in self.channels_db if pattern in name]
+                channels = [name for name in self._mdf.channels_db if pattern in name]
         elif search_mode is SearchMode.regex:
             flags = re.IGNORECASE if case_insensitive else 0
             compiled_pattern = re.compile(pattern, flags=flags)
-            channels = [name for name in self.channels_db if compiled_pattern.search(name)]
+            channels = [name for name in self._mdf.channels_db if compiled_pattern.search(name)]
         elif search_mode is SearchMode.wildcard:
             wildcard = f"{os.urandom(6).hex()}_WILDCARD_{os.urandom(6).hex()}"
             pattern = pattern.replace("*", wildcard)
@@ -5672,7 +5837,7 @@ class MDF:
 
             compiled_pattern = re.compile(pattern, flags=flags)
 
-            channels = [name for name in self.channels_db if compiled_pattern.search(name)]
+            channels = [name for name in self._mdf.channels_db if compiled_pattern.search(name)]
 
         else:
             raise ValueError(f"unsupported mode {search_mode}")
@@ -5680,15 +5845,15 @@ class MDF:
         return channels
 
     def _asc_export(self, file_name):
-        if self.version < "4.00":
+        if isinstance(self._mdf, (mdf_v2.MDF2, mdf_v3.MDF3)):
             return
 
-        groups_count = len(self.groups)
+        groups_count = len(self._mdf.groups)
 
         dfs = []
 
         for index in range(groups_count):
-            group = self.groups[index]
+            group = self._mdf.groups[index]
             if group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT:
                 source = group.channel_group.acq_source
 
@@ -5696,13 +5861,13 @@ class MDF:
 
                 if source and source.bus_type == v4c.BUS_TYPE_CAN:
                     if "CAN_DataFrame" in names:
-                        data = self.get("CAN_DataFrame", index)  # , raw=True)
+                        data = self._mdf.get("CAN_DataFrame", index)  # , raw=True)
 
                     elif "CAN_RemoteFrame" in names:
-                        data = self.get("CAN_RemoteFrame", index, raw=True)
+                        data = self._mdf.get("CAN_RemoteFrame", index, raw=True)
 
                     elif "CAN_ErrorFrame" in names:
-                        data = self.get("CAN_ErrorFrame", index, raw=True)
+                        data = self._mdf.get("CAN_ErrorFrame", index, raw=True)
 
                     else:
                         continue
@@ -5844,16 +6009,16 @@ class MDF:
 
                 elif source and source.bus_type == v4c.BUS_TYPE_FLEXRAY:
                     if "FLX_Frame" in names:
-                        data = self.get("FLX_Frame", index, raw=True)
+                        data = self._mdf.get("FLX_Frame", index, raw=True)
 
                     elif "FLX_NullFrame" in names:
-                        data = self.get("FLX_NullFrame", index, raw=True)
+                        data = self._mdf.get("FLX_NullFrame", index, raw=True)
 
                     elif "FLX_StartCycle" in names:
-                        data = self.get("FLX_StartCycle", index, raw=True)
+                        data = self._mdf.get("FLX_StartCycle", index, raw=True)
 
                     elif "FLX_Status" in names:
-                        data = self.get("FLX_Status", index, raw=True)
+                        data = self._mdf.get("FLX_Status", index, raw=True)
                     else:
                         continue
 

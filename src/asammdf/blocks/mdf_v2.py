@@ -5,7 +5,7 @@ from __future__ import annotations
 from io import BufferedReader, BytesIO
 
 from ..types import StrPathType
-from .mdf_v3 import MDF3
+from .mdf_v3 import MDF3, Version
 from .utils import MdfException, validate_version_argument
 
 __all__ = ["MDF2"]
@@ -15,13 +15,15 @@ __all__ = ["MDF2"]
 class MDF2(MDF3):
     """shared implementation for mdf version 2 and 3"""
 
+    default_version: Version = "2.14"
+
     def __init__(
         self,
         name: BufferedReader | BytesIO | StrPathType | None = None,
-        version: str = "2.14",
+        version: Version = default_version,
         **kwargs,
     ) -> None:
-        version = validate_version_argument(version, hint=2)
+        version = validate_version_argument(version, hint=self.default_version)
 
         if not kwargs.get("__internal__", False):
             raise MdfException("Always use the MDF class; do not use the class MDF2 directly")

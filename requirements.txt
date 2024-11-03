@@ -4,6 +4,7 @@
 --requirement ci/requirements.txt
 --requirement doc/requirements.txt
 --requirement test/requirements.txt
+--requirement types-requirements.txt
 black~=24.1  # Aligned with .pre-commit-config.yaml
 build
 pre-commit

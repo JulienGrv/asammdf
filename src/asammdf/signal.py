@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 import logging
 from textwrap import fill
-from typing import Any
+from typing import Any, overload
 
 import numpy as np
 from numpy.typing import ArrayLike, DTypeLike, NDArray
@@ -82,8 +82,8 @@ class Signal:
 
     def __init__(
         self,
-        samples: ArrayLike | None = None,
-        timestamps: ArrayLike | None = None,
+        samples: ArrayLike,
+        timestamps: ArrayLike,
         unit: str = "",
         name: str = "",
         conversion: dict[str, Any] | ChannelConversionType | None = None,
@@ -102,14 +102,15 @@ class Signal:
         virtual_conversion: dict[str, Any] | ChannelConversionType | None = None,
         virtual_master_conversion: dict[str, Any] | ChannelConversionType | None = None,
     ) -> None:
-        if samples is None or timestamps is None or not name:
+        if not name:
             message = (
                 '"samples", "timestamps" and "name" are mandatory '
-                f"for Signal class __init__: samples={samples}\n"
-                f"timestamps={timestamps}\nname={name}"
+                f"for Signal class __init__: samples={samples!r}\n"
+                f"timestamps={timestamps!r}\nname={name}"
             )
             raise MdfException(message)
         else:
+            self.samples: NDArray[Any]
             if not isinstance(samples, np.ndarray):
                 samples = np.array(samples)
                 kind = samples.dtype.kind
@@ -120,25 +121,31 @@ class Signal:
                         encodings = [encoding, "utf-8", "latin-1"]
                     for _encoding in encodings:
                         try:
-                            samples = encode(samples, _encoding)
+                            self.samples = encode(samples, _encoding)
                             break
                         except:
                             continue
                     else:
-                        samples = encode(samples, encodings[0], errors="ignore")
+                        self.samples = encode(samples, encodings[0], errors="ignore")
                 elif kind == "O":
-                    samples = samples.astype(bytes)
+                    self.samples = samples.astype(np.bytes_)
+                else:
+                    self.samples = samples
+            else:
+                self.samples = samples
 
+            self.timestamps: NDArray[Any]
             if not isinstance(timestamps, np.ndarray):
-                timestamps = np.array(timestamps, dtype=np.float64)
-            if samples.shape[0] != timestamps.shape[0]:
+                self.timestamps = np.array(timestamps, dtype=np.float64)
+            else:
+                self.timestamps = timestamps
+
+            if self.samples.shape[0] != self.timestamps.shape[0]:
                 message = "{} samples and timestamps length mismatch ({} vs {})"
-                message = message.format(name, samples.shape[0], timestamps.shape[0])
+                message = message.format(name, self.samples.shape[0], self.timestamps.shape[0])
                 logger.exception(message)
                 raise MdfException(message)
 
-            self.samples = samples
-            self.timestamps = timestamps
             self.unit = unit
             self.name = name
             self.comment = comment
@@ -159,29 +166,36 @@ class Signal:
             self.source = source
 
             if bit_count is None:
-                self.bit_count = samples.dtype.itemsize * 8
+                self.bit_count = self.samples.dtype.itemsize * 8
             else:
                 self.bit_count = bit_count
 
             self.invalidation_bits = invalidation_bits
 
+            self.conversion: ChannelConversionType | None
             if conversion:
                 if not isinstance(conversion, (v4b.ChannelConversion, v3b.ChannelConversion)):
-                    conversion = from_dict(conversion)
+                    self.conversion = from_dict(conversion)
+                else:
+                    self.conversion = conversion
+            else:
+                self.conversion = None
 
-            self.conversion = conversion
-
+            self.virtual_conversion: ChannelConversionType | None
             if self.flags & self.Flags.virtual:
                 if not isinstance(virtual_conversion, (v4b.ChannelConversion, v3b.ChannelConversion)):
-                    conversion = from_dict(virtual_conversion)
-                self.virtual_conversion = conversion
+                    self.virtual_conversion = from_dict(virtual_conversion)
+                else:
+                    self.virtual_conversion = virtual_conversion
             else:
                 self.virtual_conversion = None
 
+            self.virtual_master_conversion: ChannelConversionType | None
             if self.flags & self.Flags.virtual_master:
                 if not isinstance(virtual_master_conversion, (v4b.ChannelConversion, v3b.ChannelConversion)):
-                    conversion = from_dict(virtual_master_conversion)
-                self.virtual_master_conversion = conversion
+                    self.virtual_master_conversion = from_dict(virtual_master_conversion)
+                else:
+                    self.virtual_master_conversion = virtual_master_conversion
             else:
                 self.virtual_master_conversion = None
 
@@ -1069,7 +1083,7 @@ class Signal:
                 virtual_master_conversion=self.virtual_master_conversion,
             )
 
-    def __apply_func(self, other: Signal | NDArray[Any] | None, func_name: str) -> Signal:
+    def __apply_func(self, other: Signal | NDArray[Any] | int | None, func_name: str) -> Signal:
         """delegate operations to the *samples* attribute, but in a time
         correct manner by considering the *timestamps*
 
@@ -1228,13 +1242,13 @@ class Signal:
     def __pow__(self, other: Signal | NDArray[Any] | None) -> Signal:
         return self.__apply_func(other, "__pow__")
 
-    def __and__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __and__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__and__")
 
-    def __or__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __or__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__or__")
 
-    def __xor__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __xor__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__xor__")
 
     def __invert__(self) -> Signal:
@@ -1258,10 +1272,10 @@ class Signal:
             virtual_master_conversion=self.virtual_master_conversion,
         )
 
-    def __lshift__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __lshift__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__lshift__")
 
-    def __rshift__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __rshift__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__rshift__")
 
     def __lt__(self, other: Signal | NDArray[Any] | None) -> bool:
@@ -1309,7 +1323,13 @@ class Signal:
             virtual_master_conversion=self.virtual_master_conversion,
         )
 
-    def __getitem__(self, val: int | slice | ArrayLike | str) -> Signal:
+    @overload
+    def __getitem__(self, val: str) -> NDArray[Any]: ...
+
+    @overload
+    def __getitem__(self, val: int | slice | ArrayLike) -> Signal: ...
+
+    def __getitem__(self, val: int | slice | ArrayLike | str) -> NDArray[Any] | Signal:
         if isinstance(val, str):
             return self.samples[val]
         else:

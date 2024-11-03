@@ -1,6 +1,9 @@
 """ MDF v2 and v3 constants """
 
+from collections.abc import Callable
 import struct
+
+from typing_extensions import Buffer
 
 # byte order
 BYTE_ORDER_INTEL = 0
@@ -194,6 +197,7 @@ LOCATION_MEMORY = 2
 
 # blocks struct fmts and keys
 ID_FMT = "<8s8s8s4H2s26s2H"
+Id = tuple[bytes, bytes, bytes, int, int, int, int, bytes, bytes, int, int]
 ID_KEYS = (
     "file_identification",
     "version_str",
@@ -300,6 +304,7 @@ KEYS_CHANNEL_SHORT = (
 KEYS_CHANNEL_LONGNAME = (*KEYS_CHANNEL_SHORT, "long_name_addr")
 
 FMT_CHANNEL_GROUP = "<2sH3I3HI"
+_ChannelGroup = tuple[bytes, int, int, int, int, int, int, int, int]
 KEYS_CHANNEL_GROUP = (
     "id",
     "block_len",
@@ -311,8 +316,9 @@ KEYS_CHANNEL_GROUP = (
     "samples_byte_nr",
     "cycles_nr",
 )
-CHANNEL_GROUP_u = struct.Struct(FMT_CHANNEL_GROUP).unpack
-CHANNEL_GROUP_uf = struct.Struct(FMT_CHANNEL_GROUP).unpack_from
+
+CHANNEL_GROUP_u: Callable[[Buffer], _ChannelGroup] = struct.Struct(FMT_CHANNEL_GROUP).unpack
+CHANNEL_GROUP_uf: Callable[[Buffer, int], _ChannelGroup] = struct.Struct(FMT_CHANNEL_GROUP).unpack_from
 CHANNEL_GROUP_p = struct.Struct(FMT_CHANNEL_GROUP).pack
 
 FMT_DATA_GROUP_POST_320 = "<2sH4I2H4s"

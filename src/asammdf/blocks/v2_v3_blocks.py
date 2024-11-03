@@ -10,16 +10,19 @@ from struct import pack, unpack, unpack_from
 import sys
 from textwrap import wrap
 from traceback import format_exc
+import typing
 from typing import Any
 import xml.etree.ElementTree as ET
 
 import dateutil
 from numexpr import evaluate
 import numpy as np
+from typing_extensions import Unpack
 
 from .. import tool
 from . import v2_v3_constants as v23c
 from .utils import (
+    BlockKwargs,
     get_fields,
     get_text_v3,
     MdfException,
@@ -179,7 +182,7 @@ class Channel:
         "unit",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         self.name = self.comment = self.unit = ""
@@ -935,7 +938,7 @@ class ChannelConversion(_ChannelConversionBase):
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         self.is_user_defined = False
@@ -1751,7 +1754,7 @@ class ChannelDependency:
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         self.referenced_channels = []
@@ -1888,7 +1891,7 @@ class ChannelExtension:
         "type",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         self.name = self.path = self.comment = ""
@@ -2123,6 +2126,17 @@ address: {hex(self.address)}
         return f"ChannelExtension (name: {self.name}, path: {self.path}, comment: {self.comment}, address: {hex(self.address)}, fields: {fields})"
 
 
+class _ChannelGroupKwargs(BlockKwargs, total=False):
+    block_len: int
+    next_cg_addr: int
+    first_ch_addr: int
+    comment_addr: int
+    record_id: int
+    ch_nr: int
+    samples_byte_nr: int
+    cycles_nr: int
+
+
 class ChannelGroup:
     """CGBLOCK class
 
@@ -2186,7 +2200,7 @@ class ChannelGroup:
         "samples_byte_nr",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[_ChannelGroupKwargs]) -> None:
         super().__init__()
         self.comment = ""
 
@@ -2224,7 +2238,7 @@ class ChannelGroup:
                     self.ch_nr,
                     self.samples_byte_nr,
                     self.cycles_nr,
-                ) = unpack(v23c.FMT_CHANNEL_GROUP, block)
+                ) = v23c.CHANNEL_GROUP_u(block)
                 if self.block_len == v23c.CG_POST_330_BLOCK_SIZE:
                     # sample reduction blocks are not yet used
                     self.sample_reduction_addr = 0
@@ -2381,7 +2395,7 @@ class DataBlock:
 
     __slots__ = "address", "data"
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         try:
@@ -2450,7 +2464,7 @@ class DataGroup:
         "trigger_addr",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         try:
@@ -2529,6 +2543,10 @@ class DataGroup:
         return result
 
 
+class _FileIdentificationBlock(BlockKwargs, total=False):
+    version: str
+
+
 class FileIdentificationBlock:
     """IDBLOCK class
 
@@ -2575,7 +2593,7 @@ class FileIdentificationBlock:
         "version_str",
     )
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[_FileIdentificationBlock]) -> None:
         super().__init__()
 
         self.address = 0
@@ -2595,7 +2613,7 @@ class FileIdentificationBlock:
                 self.reserved1,
                 self.unfinalized_standard_flags,
                 self.unfinalized_custom_flags,
-            ) = unpack(v23c.ID_FMT, stream.read(v23c.ID_BLOCK_SIZE))
+            ) = typing.cast(v23c.Id, unpack(v23c.ID_FMT, stream.read(v23c.ID_BLOCK_SIZE)))
         except KeyError:
             version = kwargs["version"]
             self.file_identification = "MDF     ".encode("latin-1")
@@ -2669,7 +2687,7 @@ class HeaderBlock:
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         self.address = 64
@@ -2992,7 +3010,7 @@ class ProgramBlock:
 
     __slots__ = ("address", "block_len", "data", "id")
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         try:
@@ -3061,7 +3079,7 @@ class TextBlock:
 
     __slots__ = ("address", "block_len", "id", "text")
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
         try:
             stream = kwargs["stream"]
@@ -3147,7 +3165,7 @@ class TriggerBlock:
 
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         self.comment = ""

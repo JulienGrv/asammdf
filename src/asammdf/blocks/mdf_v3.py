@@ -49,7 +49,7 @@ from ..types import ChannelsType, CompressionType, RasterType, StrPathType
 from . import v2_v3_constants as v23c
 from .conversion_utils import conversion_transfer
 from .cutils import data_block_from_arrays, get_channel_raw_bytes
-from .mdf_common import MDF_Common
+from .mdf_common import Group, MDF_Common
 from .options import get_global_option
 from .source_utils import Source
 from .utils import (
@@ -62,7 +62,6 @@ from .utils import (
     fmt_to_datatype_v3,
     get_fmt_v3,
     get_text_v3,
-    Group,
     is_file_like,
     MdfException,
     TERMINATED,
@@ -93,6 +92,8 @@ except:
 logger = logging.getLogger("asammdf")
 
 __all__ = ["MDF3"]
+
+Version = Literal["2.00", "2.10", "2.14", "3.00", "3.10", "3.20", "3.30"]
 
 
 class TriggerInfoDict(TypedDict):
@@ -173,10 +174,12 @@ class MDF3(MDF_Common):
 
     """
 
+    default_version: Version = "3.30"
+
     def __init__(
         self,
         name: BufferedReader | BytesIO | StrPathType | None = None,
-        version: str = "3.30",
+        version: Version = default_version,
         channels: list[str] | None = None,
         **kwargs,
     ) -> None:
@@ -198,8 +201,7 @@ class MDF3(MDF_Common):
 
         self.temporary_folder = kwargs.get("temporary_folder", get_global_option("temporary_folder"))
 
-        self.groups = []
-        self.header = None
+        self.groups: list[Group[DataGroup, ChannelGroup, Channel]] = []
         self.identification = None
         self.channels_db = ChannelsDB()
         self.masters_db = {}
@@ -273,7 +275,7 @@ class MDF3(MDF_Common):
                     raise
         else:
             self._from_filelike = False
-            version = validate_version_argument(version, hint=3)
+            version = validate_version_argument(version, hint=self.default_version)
             self.identification = FileIdentificationBlock(version=version)
             self.version = version
             self.header = HeaderBlock(version=self.version)
@@ -353,7 +355,7 @@ class MDF3(MDF_Common):
                 blocks = iter(group.data_blocks)
 
                 cur_size = 0
-                data = []
+                data_list = []
 
                 while True:
                     try:
@@ -379,10 +381,10 @@ class MDF3(MDF_Common):
                     if record_count:
                         while size >= split_size - cur_size:
                             stream.seek(current_address)
-                            if data:
-                                data.append(stream.read(min(record_count, split_size - cur_size)))
+                            if data_list:
+                                data_list.append(stream.read(min(record_count, split_size - cur_size)))
 
-                                bts = b"".join(data)[:record_count]
+                                bts = b"".join(data_list)[:record_count]
                                 record_count -= len(bts)
                                 __count = len(bts) // samples_size
                                 yield bts, offset // samples_size, __count
@@ -407,15 +409,15 @@ class MDF3(MDF_Common):
                             offset += split_size
 
                             size -= split_size - cur_size
-                            data = []
+                            data_list = []
                             cur_size = 0
                     else:
                         while size >= split_size - cur_size:
                             stream.seek(current_address)
-                            if data:
-                                data.append(stream.read(split_size - cur_size))
+                            if data_list:
+                                data_list.append(stream.read(split_size - cur_size))
 
-                                yield b"".join(data), offset, _count
+                                yield b"".join(data_list), offset, _count
                                 has_yielded = True
                                 current_address += split_size - cur_size
                             else:
@@ -426,26 +428,26 @@ class MDF3(MDF_Common):
                             offset += split_size
 
                             size -= split_size - cur_size
-                            data = []
+                            data_list = []
                             cur_size = 0
 
                     if finished:
-                        data = []
+                        data_list = []
                         offset = -1
                         break
 
                     if size:
                         stream.seek(current_address)
                         if record_count:
-                            data.append(stream.read(min(record_count, size)))
+                            data_list.append(stream.read(min(record_count, size)))
                         else:
-                            data.append(stream.read(size))
+                            data_list.append(stream.read(size))
 
                         cur_size += size
                         offset += size
 
-                if data:
-                    data = b"".join(data)
+                if data_list:
+                    data = b"".join(data_list)
                     if record_count is not None:
                         data = data[:record_count]
                         yield data, offset, len(data) // samples_size
@@ -467,7 +469,7 @@ class MDF3(MDF_Common):
                 record_id_nr = group.data_group.record_id_len
             else:
                 record_id_nr = 0
-            cg_data = []
+            data_list = []
 
             blocks = group.data_blocks
 
@@ -484,14 +486,14 @@ class MDF3(MDF_Common):
                     rec_size = cg_size[rec_id]
                     if rec_id == record_id:
                         rec_data = data[i : i + rec_size]
-                        cg_data.append(rec_data)
+                        data_list.append(rec_data)
                     # consider the second record ID if it exists
                     if record_id_nr == 2:
                         i += rec_size + 1
                     else:
                         i += rec_size
-                cg_data = b"".join(cg_data)
-                size = len(cg_data)
+                data = b"".join(data_list)
+                size = len(data)
 
                 if size:
                     if offset + size < record_offset + 1:
@@ -503,7 +505,7 @@ class MDF3(MDF_Common):
                         size -= delta
                         offset = record_offset
 
-                    yield cg_data, offset, _count
+                    yield data, offset, _count
                     has_yielded = True
                     offset += size
         if not has_yielded:
@@ -1049,6 +1051,28 @@ class MDF3(MDF_Common):
                 trigger.comment = comment
 
             group.trigger = trigger
+
+    @overload
+    def append(
+        self,
+        signals: list[Signal] | Signal,
+        acq_name: str | None = ...,
+        acq_source: Source | None = ...,
+        comment: str = ...,
+        common_timebase: bool = ...,
+        units: dict[str, str | bytes] | None = ...,
+    ) -> int: ...
+
+    @overload
+    def append(
+        self,
+        signals: DataFrame,
+        acq_name: str | None = ...,
+        acq_source: Source | None = ...,
+        comment: str = ...,
+        common_timebase: bool = ...,
+        units: dict[str, str | bytes] | None = ...,
+    ) -> None: ...
 
     def append(
         self,
@@ -2377,7 +2401,6 @@ class MDF3(MDF_Common):
 
             self._call_back = None
             self.groups.clear()
-            self.header = None
             self.identification = None
             self.channels_db.clear()
             self.masters_db.clear()
@@ -2387,7 +2410,7 @@ class MDF3(MDF_Common):
         except:
             print(format_exc())
 
-    def extend(self, index: int, signals: list[tuple[NDArray[Any], None]]) -> None:
+    def extend(self, index: int, signals: list[tuple[NDArray[Any], NDArray[Any] | None]]) -> None:
         """
         Extend a group with new samples. *signals* contains (values, invalidation_bits)
         pairs for each extended signal. Since MDF3 does not support invalidation
@@ -2728,7 +2751,7 @@ class MDF3(MDF_Common):
         index: int | None = ...,
         raster: RasterType | None = ...,
         samples_only: Literal[False] = ...,
-        data: bytes | None = ...,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
         raw: bool = ...,
         ignore_invalidation_bits: bool = ...,
         record_offset: int = ...,
@@ -2744,13 +2767,29 @@ class MDF3(MDF_Common):
         index: int | None = ...,
         raster: RasterType | None = ...,
         samples_only: Literal[True] = ...,
-        data: bytes | None = ...,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
         raw: bool = ...,
         ignore_invalidation_bits: bool = ...,
         record_offset: int = ...,
         record_count: int | None = ...,
         skip_channel_validation: bool = ...,
     ) -> tuple[NDArray[Any], None]: ...
+
+    @overload
+    def get(
+        self,
+        name: str | None = ...,
+        group: int | None = ...,
+        index: int | None = ...,
+        raster: RasterType | None = ...,
+        samples_only: bool = ...,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
+        raw: bool = ...,
+        ignore_invalidation_bits: bool = ...,
+        record_offset: int = ...,
+        record_count: int | None = ...,
+        skip_channel_validation: bool = ...,
+    ) -> Signal | tuple[NDArray[Any], None]: ...
 
     def get(
         self,
@@ -2759,7 +2798,7 @@ class MDF3(MDF_Common):
         index: int | None = None,
         raster: RasterType | None = None,
         samples_only: bool = False,
-        data: bytes | None = None,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = None,
         raw: bool = False,
         ignore_invalidation_bits: bool = False,
         record_offset: int = 0,
@@ -3165,7 +3204,7 @@ class MDF3(MDF_Common):
     def get_master(
         self,
         index: int,
-        data: bytes | None = None,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = None,
         raster: RasterType | None = None,
         record_offset: int = 0,
         record_count: int | None = None,
@@ -3655,7 +3694,6 @@ class MDF3(MDF_Common):
             Path.rename(destination, self.name)
 
             self.groups.clear()
-            self.header = None
             self.identification = None
             self.channels_db.clear()
             self.masters_db.clear()
@@ -3827,7 +3865,7 @@ class MDF3(MDF_Common):
         record_count: int | None = None,
         skip_master: bool = True,
         version: str = "4.20",
-    ) -> Iterator[Signal | tuple[NDArray[Any], None]]:
+    ) -> Iterator[list[Signal] | list[tuple[NDArray[Any], None]]]:
         if groups is None:
             groups = self.included_channels(index)[index]
 
@@ -3846,6 +3884,7 @@ class MDF3(MDF_Common):
 
             self._prepare_record(group)
 
+            signals: list[Signal] | list[tuple[NDArray[Any] | None, None]]
             # the first fragment triggers and append that will add the
             # metadata for all channels
             if idx == 0:

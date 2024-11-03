@@ -1,8 +1,11 @@
 """ MDF v4 constants """
 
+from collections.abc import Callable
 import re
 import struct
 import sys
+
+from typing_extensions import Buffer
 
 MAX_UINT64 = (1 << 64) - 1
 
@@ -467,19 +470,79 @@ KEYS_SIMPLE_CHANNEL = (
     "upper_ext_limit",
 )
 FMT_SIMPLE_CHANNEL_PARAMS = "<8Q4B4I2BH6d"
-SIMPLE_CHANNEL_PARAMS_u = struct.Struct(FMT_SIMPLE_CHANNEL_PARAMS).unpack
-SIMPLE_CHANNEL_PARAMS_uf = struct.Struct(FMT_SIMPLE_CHANNEL_PARAMS).unpack_from
+_SimpleChannel = tuple[
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+]
+SIMPLE_CHANNEL_PARAMS_u: Callable[[Buffer], _SimpleChannel] = struct.Struct(FMT_SIMPLE_CHANNEL_PARAMS).unpack
+SIMPLE_CHANNEL_PARAMS_uf: Callable[[Buffer, int], _SimpleChannel] = struct.Struct(FMT_SIMPLE_CHANNEL_PARAMS).unpack_from
 SIMPLE_CHANNEL_PACK = struct.Struct(FMT_SIMPLE_CHANNEL).pack
 FMT_SINGLE_ATTACHMENT_CHANNEL = "<4sI11Q4B4I2BH6d"
 SINGLE_ATTACHMENT_CHANNEL_PACK = struct.Struct(FMT_SINGLE_ATTACHMENT_CHANNEL).pack
 FMT_SINGLE_ATTACHMENT_CHANNEL_PARAMS = "<9Q4B4I2BH6d"
-SINGLE_ATTACHMENT_CHANNEL_PARAMS_uf = struct.Struct(FMT_SINGLE_ATTACHMENT_CHANNEL_PARAMS).unpack_from
-SINGLE_ATTACHMENT_CHANNEL_PARAMS_u = struct.Struct(FMT_SINGLE_ATTACHMENT_CHANNEL_PARAMS).unpack
+_SingleAttachmentChannel = tuple[
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+]
+SINGLE_ATTACHMENT_CHANNEL_PARAMS_uf: Callable[[Buffer, int], _SingleAttachmentChannel] = struct.Struct(
+    FMT_SINGLE_ATTACHMENT_CHANNEL_PARAMS
+).unpack_from
+SINGLE_ATTACHMENT_CHANNEL_PARAMS_u: Callable[[Buffer], _SingleAttachmentChannel] = struct.Struct(
+    FMT_SINGLE_ATTACHMENT_CHANNEL_PARAMS
+).unpack
 
 FMT_TEXT_BLOCK = "<4sIQQ{}s"
 KEYS_TEXT_BLOCK = ("id", "reserved0", "block_len", "links_nr", "text")
 
 FMT_SOURCE_INFORMATION = "<4sI5Q3B5s"
+SourceInformation = tuple[bytes, int, int, int, int, int, int, int, int, int, bytes]
 KEYS_SOURCE_INFORMATION = (
     "id",
     "reserved0",
@@ -520,6 +583,7 @@ CHANNEL_GROUP_uf = struct.Struct(FMT_CHANNEL_GROUP).unpack_from
 CHANNEL_GROUP_p = struct.Struct(FMT_CHANNEL_GROUP).pack
 
 FMT_CHANNEL_GROUP_SHORT = "<8Q2H3I"
+_ChannelGroup = tuple[int, int, int, int, int, int, int, int, int, int, int, int, int]
 KEYS_CHANNEL_GROUP_SHORT = (
     "next_cg_addr",
     "first_ch_addr",
@@ -535,8 +599,8 @@ KEYS_CHANNEL_GROUP_SHORT = (
     "samples_byte_nr",
     "invalidation_bytes_nr",
 )
-CHANNEL_GROUP_SHORT_u = struct.Struct(FMT_CHANNEL_GROUP_SHORT).unpack
-CHANNEL_GROUP_SHORT_uf = struct.Struct(FMT_CHANNEL_GROUP_SHORT).unpack_from
+CHANNEL_GROUP_SHORT_u: Callable[[Buffer], _ChannelGroup] = struct.Struct(FMT_CHANNEL_GROUP_SHORT).unpack
+CHANNEL_GROUP_SHORT_uf: Callable[[Buffer, int], _ChannelGroup] = struct.Struct(FMT_CHANNEL_GROUP_SHORT).unpack_from
 CHANNEL_GROUP_SHORT_p = struct.Struct(FMT_CHANNEL_GROUP_SHORT).pack
 
 FMT_CHANNEL_GROUP_RM = "<4sI11Q2H3I"
@@ -565,6 +629,7 @@ CHANNEL_GROUP_RM_uf = struct.Struct(FMT_CHANNEL_GROUP_RM).unpack_from
 CHANNEL_GROUP_RM_p = struct.Struct(FMT_CHANNEL_GROUP_RM).pack
 
 FMT_CHANNEL_GROUP_RM_SHORT = "<9Q2H3I"
+_ChannelGroupRmShort = tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int]
 KEYS_CHANNEL_GROUP_RM_SHORT = (
     "next_cg_addr",
     "first_ch_addr",
@@ -581,8 +646,10 @@ KEYS_CHANNEL_GROUP_RM_SHORT = (
     "samples_byte_nr",
     "invalidation_bytes_nr",
 )
-CHANNEL_GROUP_RM_SHORT_u = struct.Struct(FMT_CHANNEL_GROUP_RM_SHORT).unpack
-CHANNEL_GROUP_RM_SHORT_uf = struct.Struct(FMT_CHANNEL_GROUP_RM_SHORT).unpack_from
+CHANNEL_GROUP_RM_SHORT_u: Callable[[Buffer], _ChannelGroupRmShort] = struct.Struct(FMT_CHANNEL_GROUP_RM_SHORT).unpack
+CHANNEL_GROUP_RM_SHORT_uf: Callable[[Buffer, int], _ChannelGroupRmShort] = struct.Struct(
+    FMT_CHANNEL_GROUP_RM_SHORT
+).unpack_from
 CHANNEL_GROUP_RM_SHORT_p = struct.Struct(FMT_CHANNEL_GROUP_RM_SHORT).pack
 
 FMT_DATA_BLOCK = "<4sI2Q{}s"
@@ -653,15 +720,21 @@ KEYS_CONVERSION_NONE = (
 )
 CONVERSION_NONE_PACK = struct.Struct(FMT_CONVERSION_NONE).pack
 FMT_CONVERSION_NONE_INIT = "<4Q2B3H2d"
-CONVERSION_NONE_INIT_u = struct.Struct(FMT_CONVERSION_NONE_INIT).unpack
-CONVERSION_NONE_INIT_uf = struct.Struct(FMT_CONVERSION_NONE_INIT).unpack_from
+_ConversionNoneInit = tuple[int, int, int, int, int, int, int, int, int, float, float]
+CONVERSION_NONE_INIT_u: Callable[[Buffer], _ConversionNoneInit] = struct.Struct(FMT_CONVERSION_NONE_INIT).unpack
+CONVERSION_NONE_INIT_uf: Callable[[Buffer, int], _ConversionNoneInit] = struct.Struct(
+    FMT_CONVERSION_NONE_INIT
+).unpack_from
 
 FMT_CONVERSION_LINEAR = FMT_CONVERSION_NONE + "2d"
 CONVERSION_LINEAR_PACK = struct.Struct(FMT_CONVERSION_LINEAR).pack
 KEYS_CONVERSION_LINEAR = (*KEYS_CONVERSION_NONE, "b", "a")
 FMT_CONVERSION_LINEAR_INIT = "<4Q2B3H4d"
-CONVERSION_LINEAR_INIT_u = struct.Struct(FMT_CONVERSION_LINEAR_INIT).unpack
-CONVERSION_LINEAR_INIT_uf = struct.Struct(FMT_CONVERSION_LINEAR_INIT).unpack_from
+_ConversionLinearInit = tuple[int, int, int, int, int, int, int, int, int, float, float, float, float]
+CONVERSION_LINEAR_INIT_u: Callable[[Buffer], _ConversionLinearInit] = struct.Struct(FMT_CONVERSION_LINEAR_INIT).unpack
+CONVERSION_LINEAR_INIT_uf: Callable[[Buffer, int], _ConversionLinearInit] = struct.Struct(
+    FMT_CONVERSION_LINEAR_INIT
+).unpack_from
 
 FMT_CONVERSION_ALGEBRAIC = "<4sI7Q2B3H2d"
 CONVERSION_ALGEBRAIC_PACK = struct.Struct(FMT_CONVERSION_ALGEBRAIC).pack
@@ -684,17 +757,20 @@ KEYS_CONVERSION_ALGEBRAIC = (
     "max_phy_value",
 )
 FMT_CONVERSION_ALGEBRAIC_INIT = "<5Q2B3H2d"
+ConversionAlgebraicInit = tuple[int, int, int, int, int, int, int, int, int, int, float, float]
 
 FMT_CONVERSION_RAT = FMT_CONVERSION_NONE + "6d"
 CONVERSION_RAT_PACK = struct.Struct(FMT_CONVERSION_RAT).pack
 KEYS_CONVERSION_RAT = (*KEYS_CONVERSION_NONE, "P1", "P2", "P3", "P4", "P5", "P6")
 
 FMT_CONVERSION_RAT_INIT = "<4Q2B3H8d"
-
-FMT_CONVERSION_RAT_INIT = "<4Q2B3H8d"
+ConversionRatInit = tuple[
+    int, int, int, int, int, int, int, int, int, float, float, float, float, float, float, float, float
+]
 
 FMT_HEADER_BLOCK = "<4sI9Q2h4B2Q"
 FMT_IDENTIFICATION_BLOCK = "<8s8s8s4sH30s2H"
+IdentificationBlock = tuple[bytes, bytes, bytes, bytes, int, bytes, int, int]
 
 KEYS_HEADER_BLOCK = (
     "id",

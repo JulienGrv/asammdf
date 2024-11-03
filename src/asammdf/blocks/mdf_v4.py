@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import bisect
 from collections import defaultdict, deque
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
@@ -22,7 +22,7 @@ import shutil
 import sys
 from tempfile import gettempdir, NamedTemporaryFile
 from traceback import format_exc
-from typing import Any, overload
+from typing import Any, overload, SupportsBytes
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import canmatrix
@@ -58,7 +58,7 @@ from numpy import (
 )
 from numpy.typing import NDArray
 from pandas import DataFrame
-from typing_extensions import Literal
+from typing_extensions import Literal, TypedDict
 
 from .. import tool
 from ..signal import InvalidationArray, Signal
@@ -66,6 +66,7 @@ from ..types import (
     BusType,
     ChannelsType,
     CompressionType,
+    DbcFileType,
     RasterType,
     ReadableBufferType,
     StrPathType,
@@ -81,7 +82,7 @@ from .cutils import (
     get_vlsd_max_sample_size,
     sort_data_block,
 )
-from .mdf_common import MDF_Common
+from .mdf_common import debug_channel, Group, MDF_Common
 from .options import get_global_option
 from .source_utils import Source
 from .utils import (
@@ -92,14 +93,12 @@ from .utils import (
     CONVERT,
     count_channel_groups,
     DataBlockInfo,
-    debug_channel,
     extract_display_names,
     extract_encryption_information,
     extract_xml_comment,
     fmt_to_datatype_v4,
     get_fmt_v4,
     get_text_v4,
-    Group,
     InvalidationBlockInfo,
     is_file_like,
     load_can_database,
@@ -131,6 +130,7 @@ from .v4_blocks import (
     HeaderBlock,
     HeaderList,
     ListData,
+    ListDataKwargs,
     SourceInformation,
     TextBlock,
 )
@@ -173,6 +173,31 @@ SORT_STEPS = 102
 logger = logging.getLogger("asammdf")
 
 __all__ = ["MDF4"]
+
+Version = Literal["4.00", "4.10", "4.11", "4.20"]
+
+
+class CanBusInfo(TypedDict):
+    dbc_files: Iterable[DbcFileType]
+    total_unique_ids: set[tuple[int, bool]]
+    unknown_id_count: int
+    not_found_ids: defaultdict[StrPathType, list[tuple[tuple[int, bool] | int, str]]]
+    found_ids: defaultdict[StrPathType, set[tuple[tuple[int, int, bool], str]]]
+    unknown_ids: set[int | tuple[int, bool]]
+
+
+class LinBusInfo(TypedDict):
+    dbc_files: Iterable[DbcFileType]
+    total_unique_ids: set[tuple[int, ...]]
+    unknown_id_count: int
+    not_found_ids: defaultdict[StrPathType, list[tuple[int, str]]]
+    found_ids: defaultdict[StrPathType, set[tuple[int, str]]]
+    unknown_ids: set[int]
+
+
+class BusInfo(TypedDict, total=False):
+    CAN: CanBusInfo
+    LIN: LinBusInfo
 
 
 class MDF4(MDF_Common):
@@ -257,10 +282,12 @@ class MDF4(MDF_Common):
 
     """
 
+    default_version: Version = "4.10"
+
     def __init__(
         self,
         name: BufferedReader | BytesIO | StrPathType | None = None,
-        version: str = "4.10",
+        version: Version = default_version,
         channels: list[str] | None = None,
         **kwargs,
     ) -> None:
@@ -273,10 +300,9 @@ class MDF4(MDF_Common):
 
         self._kwargs = kwargs
         self.original_name = kwargs["original_name"]
-        self.groups = []
-        self.header = None
+        self.groups: list[Group[DataGroup, ChannelGroup, Channel]] = []
         self.identification = None
-        self.file_history = []
+        self.file_history: list[FileHistory] = []
         self.channels_db = ChannelsDB()
         self.masters_db = {}
         self.attachments = []
@@ -285,7 +311,7 @@ class MDF4(MDF_Common):
         self.events = []
         self.bus_logging_map = {"CAN": {}, "ETHERNET": {}, "FLEXRAY": {}, "LIN": {}}
 
-        self._attachments_map = {}
+        self._attachments_map: dict[int, int] = {}
         self._ch_map = {}
         self._master_channel_metadata = {}
         self._invalidation_cache = {}
@@ -334,14 +360,14 @@ class MDF4(MDF_Common):
         self.copy_on_get = kwargs.get("copy_on_get", True)
         self.compact_vlsd = kwargs.get("compact_vlsd", False)
 
-        self.virtual_groups = {}  # master group 2 referencing groups
+        self.virtual_groups: dict[int, VirtualChannelGroup] = {}  # master group 2 referencing groups
         self.virtual_groups_map = {}  # group index 2 master group
 
         self.vlsd_max_length = {}  # hint about the maximum vlsd length for group_index, name pairs
 
         self._master = None
 
-        self.last_call_info = None
+        self.last_call_info: BusInfo = {}
 
         # make sure no appended block has the address 0
         self._tempfile.write(b"\0")
@@ -398,7 +424,7 @@ class MDF4(MDF_Common):
 
         else:
             self._from_filelike = False
-            version = validate_version_argument(version)
+            version = validate_version_argument(version, self.default_version)
             self.header = HeaderBlock()
             self.identification = FileIdentificationBlock(version=version)
             self.version = version
@@ -479,7 +505,7 @@ class MDF4(MDF_Common):
         current_cg_index = 0
 
         self.identification = FileIdentificationBlock(stream=stream, mapped=mapped)
-        version = self.identification["version_str"]
+        version = self.identification.version_str
         self.version = version.decode("utf-8").strip(" \n\t\r\0")
 
         if self.version >= "4.20":
@@ -2627,6 +2653,28 @@ class MDF4(MDF_Common):
         invalidation_bits = invalidation_bits.view(bool)
 
         return InvalidationArray(invalidation_bits, (group_index, ch_invalidation_pos))
+
+    @overload
+    def append(
+        self,
+        signals: list[Signal] | Signal,
+        acq_name: str | None = ...,
+        acq_source: Source | None = ...,
+        comment: str = ...,
+        common_timebase: bool = ...,
+        units: dict[str, str | bytes] | None = ...,
+    ) -> int: ...
+
+    @overload
+    def append(
+        self,
+        signals: DataFrame,
+        acq_name: str | None = ...,
+        acq_source: Source | None = ...,
+        comment: str = ...,
+        common_timebase: bool = ...,
+        units: dict[str, str | bytes] | None = ...,
+    ) -> None: ...
 
     def append(
         self,
@@ -6440,7 +6488,6 @@ class MDF4(MDF_Common):
         for gp in self.groups:
             gp.clear()
         self.groups.clear()
-        self.header = None
         self.identification = None
         self.file_history.clear()
         self.channels_db.clear()
@@ -6591,7 +6638,7 @@ class MDF4(MDF_Common):
         index: int | None = ...,
         raster: RasterType | None = ...,
         samples_only: Literal[False] = ...,
-        data: bytes | None = ...,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
         raw: bool = ...,
         ignore_invalidation_bits: bool = ...,
         record_offset: int = ...,
@@ -6607,13 +6654,29 @@ class MDF4(MDF_Common):
         index: int | None = ...,
         raster: RasterType | None = ...,
         samples_only: Literal[True] = ...,
-        data: bytes | None = ...,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
         raw: bool = ...,
         ignore_invalidation_bits: bool = ...,
         record_offset: int = ...,
         record_count: int | None = ...,
         skip_channel_validation: bool = ...,
     ) -> tuple[NDArray[Any], NDArray[Any]]: ...
+
+    @overload
+    def get(
+        self,
+        name: str | None = ...,
+        group: int | None = ...,
+        index: int | None = ...,
+        raster: RasterType | None = ...,
+        samples_only: bool = ...,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
+        raw: bool = ...,
+        ignore_invalidation_bits: bool = ...,
+        record_offset: int = ...,
+        record_count: int | None = ...,
+        skip_channel_validation: bool = ...,
+    ) -> Signal | tuple[NDArray[Any], NDArray[Any]]: ...
 
     def get(
         self,
@@ -6622,7 +6685,7 @@ class MDF4(MDF_Common):
         index: int | None = None,
         raster: RasterType | None = None,
         samples_only: bool = False,
-        data: bytes | None = None,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = None,
         raw: bool = False,
         ignore_invalidation_bits: bool = False,
         record_offset: int = 0,
@@ -8241,7 +8304,7 @@ class MDF4(MDF_Common):
         record_count: int | None = None,
         skip_master: bool = True,
         version: str | None = None,
-    ) -> Iterator[Signal | tuple[NDArray[Any], NDArray[Any]]]:
+    ) -> Iterator[list[Signal] | list[tuple[NDArray[Any], NDArray[Any]]]]:
         version = version or self.version
         virtual_channel_group = self.virtual_groups[index]
         record_size = virtual_channel_group.record_size
@@ -8374,7 +8437,7 @@ class MDF4(MDF_Common):
     def get_master(
         self,
         index: int,
-        data: bytes | None = None,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = None,
         raster: RasterType | None = None,
         record_offset: int = 0,
         record_count: int | None = None,
@@ -9149,7 +9212,7 @@ class MDF4(MDF_Common):
         compression: CompressionType = 0,
         progress=None,
         add_history_block: bool = True,
-    ) -> Path:
+    ) -> Path | object:
         """Save MDF to *dst*. If overwrite is *True* then the destination file
         is overwritten, otherwise the file name is appended with '.<cntr>', were
         '<cntr>' is the first counter that produces a new file name
@@ -9239,9 +9302,9 @@ class MDF4(MDF_Common):
         cg_map = {}
 
         try:
-            defined_texts = {"": 0, b"": 0}
-            cc_map = {}
-            si_map = {}
+            defined_texts: dict[str | bytes, int] = {"": 0, b"": 0}
+            cc_map: dict[bytes, int] = {}
+            si_map: dict[bytes, int] = {}
 
             groups_nr = len(self.groups)
 
@@ -9249,7 +9312,7 @@ class MDF4(MDF_Common):
             tell = dst_.tell
             seek = dst_.seek
 
-            blocks = []
+            blocks: list[SupportsBytes] = []
 
             write(bytes(self.identification))
 
@@ -9299,6 +9362,7 @@ class MDF4(MDF_Common):
                     if chunks == 1:
                         data_, _1, _2, inval_ = next(data)
                         if self.version >= "4.20" and gp.uses_ld:
+                            data_block: DataZippedBlock | DataBlock
                             if compression:
                                 if gp.channel_group.samples_byte_nr > 1:
                                     current_zip_type = zip_type
@@ -9339,12 +9403,12 @@ class MDF4(MDF_Common):
                                         "param": param,
                                         "original_type": b"DI",
                                     }
-                                    inval_block = DataZippedBlock(**kwargs)
+                                    data_block = DataZippedBlock(**kwargs)
                                 else:
-                                    inval_block = DataBlock(data=inval_, type="DI")
-                                write(bytes(inval_block))
+                                    data_block = DataBlock(data=inval_, type="DI")
+                                write(bytes(data_block))
 
-                                align = inval_block.block_len % 8
+                                align = data_block.block_len % 8
                                 if align:
                                     write(b"\0" * (8 - align))
 
@@ -9436,32 +9500,32 @@ class MDF4(MDF_Common):
                                             "param": param,
                                             "original_type": b"DI",
                                         }
-                                        inval_block = DataZippedBlock(**kwargs)
+                                        data_block = DataZippedBlock(**kwargs)
                                     else:
-                                        inval_block = DataBlock(data=inval_, type="DI")
+                                        data_block = DataBlock(data=inval_, type="DI")
                                     di_addr.append(tell())
-                                    write(bytes(inval_block))
+                                    write(bytes(data_block))
 
-                                    align = inval_block.block_len % 8
+                                    align = data_block.block_len % 8
                                     if align:
                                         write(b"\0" * (8 - align))
 
                             address = tell()
 
-                            kwargs = {
+                            ld_kwargs: ListDataKwargs = {
                                 "flags": v4c.FLAG_LD_EQUAL_LENGHT,
                                 "data_block_nr": len(dv_addr),
                                 "data_block_len": block_size // gp.channel_group.samples_byte_nr,
                             }
                             for i, addr in enumerate(dv_addr):
-                                kwargs[f"data_block_addr_{i}"] = addr
+                                ld_kwargs[f"data_block_addr_{i}"] = addr  # type: ignore[literal-required]
 
                             if di_addr:
-                                kwargs["flags"] |= v4c.FLAG_LD_INVALIDATION_PRESENT
+                                ld_kwargs["flags"] |= v4c.FLAG_LD_INVALIDATION_PRESENT
                                 for i, addr in enumerate(di_addr):
-                                    kwargs[f"invalidation_bits_addr_{i}"] = addr
+                                    ld_kwargs[f"invalidation_bits_addr_{i}"] = addr  # type: ignore[literal-required]
 
-                            ld_block = ListData(**kwargs)
+                            ld_block = ListData(**ld_kwargs)
                             write(bytes(ld_block))
 
                             align = ld_block.block_len % 8
@@ -9508,15 +9572,15 @@ class MDF4(MDF_Common):
                                         "zip_type": zip_type,
                                         "param": param,
                                     }
-                                    block = DataZippedBlock(**kwargs)
+                                    data_block = DataZippedBlock(**kwargs)
                                 else:
-                                    block = DataBlock(data=data_)
+                                    data_block = DataBlock(data=data_)
                                 address = tell()
-                                block.address = address
+                                data_block.address = address
 
-                                write(bytes(block))
+                                write(bytes(data_block))
 
-                                align = block.block_len % 8
+                                align = data_block.block_len % 8
                                 if align:
                                     write(b"\0" * (8 - align))
                                 dl_block[f"data_block_addr{i}"] = address
@@ -9601,29 +9665,29 @@ class MDF4(MDF_Common):
 
                             if chunks == 1:
                                 if compression and self.version > "4.00":
-                                    signal_data = DataZippedBlock(
+                                    data_block = DataZippedBlock(
                                         data=sdata,
                                         zip_type=v4c.FLAG_DZ_DEFLATE,
                                         original_type=b"SD",
                                     )
-                                    signal_data.address = address
-                                    address += signal_data.block_len
-                                    blocks.append(signal_data)
-                                    align = signal_data.block_len % 8
+                                    data_block.address = address
+                                    address += data_block.block_len
+                                    blocks.append(data_block)
+                                    align = data_block.block_len % 8
                                     if align:
                                         blocks.append(b"\0" * (8 - align))
                                         address += 8 - align
                                 else:
-                                    signal_data = DataBlock(data=sdata, type="SD")
-                                    signal_data.address = address
-                                    address += signal_data.block_len
-                                    blocks.append(signal_data)
-                                    align = signal_data.block_len % 8
+                                    data_block = DataBlock(data=sdata, type="SD")
+                                    data_block.address = address
+                                    address += data_block.block_len
+                                    blocks.append(data_block)
+                                    align = data_block.block_len % 8
                                     if align:
                                         blocks.append(b"\0" * (8 - align))
                                         address += 8 - align
 
-                                channel.data_block_addr = signal_data.address
+                                channel.data_block_addr = data_block.address
                             else:
                                 kwargs = {
                                     "flags": v4c.FLAG_DL_EQUAL_LENGHT,
@@ -9645,18 +9709,18 @@ class MDF4(MDF_Common):
                                             "param": param,
                                             "original_type": b"SD",
                                         }
-                                        block = DataZippedBlock(**kwargs)
+                                        data_block = DataZippedBlock(**kwargs)
                                     else:
-                                        block = DataBlock(data=data_, type="SD")
-                                    blocks.append(block)
-                                    block.address = address
-                                    address += block.block_len
+                                        data_block = DataBlock(data=data_, type="SD")
+                                    blocks.append(data_block)
+                                    data_block.address = address
+                                    address += data_block.block_len
 
-                                    align = block.block_len % 8
+                                    align = data_block.block_len % 8
                                     if align:
                                         blocks.append(b"\0" * (8 - align))
                                         address += 8 - align
-                                    dl_block[f"data_block_addr{k}"] = block.address
+                                    dl_block[f"data_block_addr{k}"] = data_block.address
 
                                 dl_block.address = address
                                 blocks.append(dl_block)
@@ -9861,7 +9925,7 @@ class MDF4(MDF_Common):
                 return TERMINATED
 
             # attachments
-            at_map = {}
+            at_map: dict[int, int] = {}
             if self.attachments:
                 # put the attachment texts before the attachments
                 for at_block in self.attachments:
@@ -9975,7 +10039,6 @@ class MDF4(MDF_Common):
                 pass
 
             self.groups.clear()
-            self.header = None
             self.identification = None
             self.file_history.clear()
             self.channels_db.clear()

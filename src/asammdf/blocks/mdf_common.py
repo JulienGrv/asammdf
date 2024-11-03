@@ -4,16 +4,164 @@ ASAM MDF version 4 file format module
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from io import StringIO
 import logging
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from numpy.typing import NDArray
 
-from .utils import MdfException
+from ..types import ChannelType, MDF_v2_v3_v4
+from . import v2_v3_blocks, v4_blocks
+from .utils import DataBlockInfo, EMPTY_TUPLE, MdfException, SignalDataBlockInfo
 
 logger = logging.getLogger("asammdf")
 
 __all__ = ["MDF_Common"]
+
+
+_DG = TypeVar("_DG", v2_v3_blocks.DataGroup, v4_blocks.DataGroup)
+_CG = TypeVar("_CG", v2_v3_blocks.ChannelGroup, v4_blocks.ChannelGroup)
+_CN = TypeVar("_CN", v2_v3_blocks.Channel, v4_blocks.Channel)
+
+
+class Group(Generic[_DG, _CG, _CN]):
+    __slots__ = (
+        "channel_dependencies",
+        "channel_group",
+        "channels",
+        "data_blocks",
+        "data_blocks_info_generator",
+        "data_group",
+        "data_location",
+        "index",
+        "read_split_count",
+        "record",
+        "record_size",
+        "record_size",
+        "signal_data",
+        "signal_types",
+        "single_channel_dtype",
+        "sorted",
+        "string_dtypes",
+        "trigger",
+        "uses_ld",
+        "uuid",
+    )
+
+    def __init__(self, data_group: _DG) -> None:
+        self.data_group = data_group
+        self.channel_group: _CG
+        self.channels: list[_CN] = []
+        self.channel_dependencies = []
+        self.signal_data = []
+        self.record = None
+        self.trigger = None
+        self.sorted: bool
+        self.string_dtypes = None
+        self.data_blocks = []
+        self.single_channel_dtype = None
+        self.uses_ld = False
+        self.read_split_count = 0
+        self.data_blocks_info_generator = iter(EMPTY_TUPLE)
+        self.uuid = ""
+        self.data_location: int
+        self.index = 0
+
+    def __getitem__(self, item: str) -> Any:
+        return self.__getattribute__(item)
+
+    def __setitem__(self, item: str, value: Any) -> None:
+        self.__setattr__(item, value)
+
+    def set_blocks_info(self, info: list[DataBlockInfo]) -> None:
+        self.data_blocks = info
+
+    def __contains__(self, item: str) -> bool:
+        return hasattr(self, item)
+
+    def clear(self) -> None:
+        self.data_blocks.clear()
+        self.channels.clear()
+        self.channel_dependencies.clear()
+        self.signal_data.clear()
+        self.data_blocks_info_generator = None
+
+    def get_data_blocks(self) -> Iterator[DataBlockInfo]:
+        yield from self.data_blocks
+
+        while True:
+            try:
+                info = next(self.data_blocks_info_generator)
+                self.data_blocks.append(info)
+                yield info
+            except StopIteration:
+                break
+
+    def get_signal_data_blocks(self, index: int) -> Iterator[SignalDataBlockInfo]:
+        signal_data = self.signal_data[index]
+        if signal_data is not None:
+            signal_data, signal_generator = signal_data
+            yield from signal_data
+
+            while True:
+                try:
+                    info = next(signal_generator)
+                    signal_data.append(info)
+                    yield info
+                except StopIteration:
+                    break
+
+
+def debug_channel(
+    mdf: MDF_v2_v3_v4,
+    group: Group,
+    channel: ChannelType,
+    dependency: list[tuple[int, int]],
+    file: StringIO | None = None,
+) -> None:
+    """use this to print debug information in case of errors
+
+    Parameters
+    ----------
+    mdf : MDF
+        source MDF object
+    group : dict
+        group
+    channel : Channel
+        channel object
+    dependency : ChannelDependency
+        channel dependency object
+
+    """
+    print("MDF", "=" * 76, file=file)
+    print("name:", mdf.name, file=file)
+    print("version:", mdf.version, file=file)
+    print("read fragment size:", mdf._read_fragment_size, file=file)
+    print("write fragment size:", mdf._write_fragment_size, file=file)
+    print()
+
+    record = mdf._prepare_record(group)
+    print("GROUP", "=" * 74, file=file)
+    print("sorted:", group["sorted"], file=file)
+    print("data location:", group["data_location"], file=file)
+    print("data blocks:", group.data_blocks, file=file)
+    print("dependencies", group["channel_dependencies"], file=file)
+    print("record:", record, file=file)
+    print(file=file)
+
+    cg = group["channel_group"]
+    print("CHANNEL GROUP", "=" * 66, file=file)
+    print(cg, cg.cycles_nr, cg.samples_byte_nr, cg.invalidation_bytes_nr, file=file)
+    print(file=file)
+
+    print("CHANNEL", "=" * 72, file=file)
+    print(channel, file=file)
+    print(file=file)
+
+    print("CHANNEL ARRAY", "=" * 66, file=file)
+    print(dependency, file=file)
+    print(file=file)
 
 
 class MDF_Common:

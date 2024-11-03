@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from traceback import format_exc
-from typing import Any
+from typing import Any, overload, Union
 
 from canmatrix import Frame, Signal
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TypedDict
+from typing_extensions import Literal, TypedDict
 
 from . import v4_blocks as v4b
 from . import v4_constants as v4c
@@ -246,13 +246,27 @@ def extract_lin_signal(
     return extract_signal(signal, payload, raw, ignore_value2text_conversion)
 
 
-class ExtractedSignal(TypedDict):
+class ExtractedSignalNoInvalidationBits(TypedDict):
     name: str
     comment: str
     unit: str
     samples: NDArray[Any]
+    conversion: v4b.ChannelConversion | None
+    t: NDArray[Any]
+    invalidation_bits: None
+
+
+class ExtractedSignalWithInvalidationBits(TypedDict):
+    name: str
+    comment: str
+    unit: str
+    samples: NDArray[Any]
+    conversion: v4b.ChannelConversion | None
     t: NDArray[Any]
     invalidation_bits: NDArray[Any]
+
+
+ExtractedSignal = Union[ExtractedSignalNoInvalidationBits, ExtractedSignalWithInvalidationBits]
 
 
 def merge_cantp(payload, ts):
@@ -276,6 +290,65 @@ def merge_cantp(payload, ts):
     return frames, np.array(t_out)
 
 
+@overload
+def extract_mux(
+    payload: NDArray[Any],
+    message: Frame,
+    message_id: int,
+    bus: int,
+    t: NDArray[Any],
+    muxer: str | None = ...,
+    muxer_values: NDArray[Any] | None = ...,
+    original_message_id: int | None = ...,
+    raw: bool = ...,
+    include_message_name: bool = ...,
+    ignore_value2text_conversion: bool = ...,
+    is_j1939: Literal[False] = ...,
+    is_extended: bool = ...,
+) -> dict[tuple[int, int, bool, int | None, str | None, int, int], dict[str, ExtractedSignalNoInvalidationBits]]: ...
+
+
+@overload
+def extract_mux(
+    payload: NDArray[Any],
+    message: Frame,
+    message_id: int,
+    bus: int,
+    t: NDArray[Any],
+    muxer: str | None = ...,
+    muxer_values: NDArray[Any] | None = ...,
+    original_message_id: int | None = ...,
+    raw: bool = ...,
+    include_message_name: bool = ...,
+    ignore_value2text_conversion: bool = ...,
+    *,
+    is_j1939: Literal[True],
+    is_extended: bool = ...,
+) -> dict[tuple[int, int, bool, int | None, str | None, int, int], dict[str, ExtractedSignalWithInvalidationBits]]: ...
+
+
+@overload
+def extract_mux(
+    payload: NDArray[Any],
+    message: Frame,
+    message_id: int,
+    bus: int,
+    t: NDArray[Any],
+    muxer: str | None = ...,
+    muxer_values: NDArray[Any] | None = ...,
+    original_message_id: int | None = ...,
+    raw: bool = ...,
+    include_message_name: bool = ...,
+    ignore_value2text_conversion: bool = ...,
+    *,
+    is_j1939: bool,
+    is_extended: bool = ...,
+) -> (
+    dict[tuple[int, int, bool, int | None, str | None, int, int], dict[str, ExtractedSignalNoInvalidationBits]]
+    | dict[tuple[int, int, bool, int | None, str | None, int, int], dict[str, ExtractedSignalWithInvalidationBits]]
+): ...
+
+
 def extract_mux(
     payload: NDArray[Any],
     message: Frame,
@@ -290,7 +363,10 @@ def extract_mux(
     ignore_value2text_conversion: bool = True,
     is_j1939: bool = False,
     is_extended: bool = False,
-) -> dict[tuple[Any, ...], dict[str, ExtractedSignal]]:
+) -> (
+    dict[tuple[int, int, bool, int | None, str | None, int, int], dict[str, ExtractedSignalNoInvalidationBits]]
+    | dict[tuple[int, int, bool, int | None, str | None, int, int], dict[str, ExtractedSignalWithInvalidationBits]]
+):
     """extract multiplexed CAN signals from the raw payload
 
     Parameters
@@ -337,7 +413,7 @@ def extract_mux(
                     sig.mux_val_min = sig.mux_val_max = int(sig.multiplex)
                     sig.mux_val_grp.insert(0, (int(sig.multiplex), int(sig.multiplex)))
 
-    extracted_signals = {}
+    extracted_signals: dict[tuple[int, int, bool, int | None, str | None, int, int], dict[str, ExtractedSignal]] = {}
 
     # (Too?) simple check for ISO-TP CAN data - if it has flow control, we believe its ISO-TP
     is_ISOTP = "CanTpFcFrameId" in message.attributes
@@ -355,20 +431,21 @@ def extract_mux(
 
         return extracted_signals
 
-    pairs = {}
+    pairs: dict[tuple[int, int], list[Signal]] = {}
     for signal in message:
         if signal.muxer_for_signal == muxer:
             try:
-                entry = signal.mux_val_min, signal.mux_val_max
+                min_max_pair = signal.mux_val_min, signal.mux_val_max
             except:
-                entry = tuple(signal.mux_val_grp[0]) if signal.mux_val_grp else (0, 0)
-            pair_signals = pairs.setdefault(entry, [])
+                min_max_pair = tuple(signal.mux_val_grp[0]) if signal.mux_val_grp else (0, 0)
+            pair_signals = pairs.setdefault(min_max_pair, [])
             pair_signals.append(signal)
 
     for pair, pair_signals in pairs.items():
         entry = bus, message_id, is_extended, original_message_id, muxer, *pair
 
-        extracted_signals[entry] = signals = {}
+        signals: dict[str, ExtractedSignal] = {}
+        extracted_signals[entry] = signals
 
         if muxer_values is not None:
             min_, max_ = pair

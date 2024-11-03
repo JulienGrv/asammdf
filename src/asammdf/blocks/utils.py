@@ -7,7 +7,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 from copy import deepcopy
 from functools import lru_cache
-from io import StringIO
 import json
 import logging
 from pathlib import Path
@@ -20,7 +19,13 @@ import sys
 from tempfile import TemporaryDirectory
 from time import perf_counter
 from traceback import format_exc
-from typing import Any, overload
+from typing import (
+    Any,
+    BinaryIO,
+    overload,
+    Protocol,
+    TypeVar,
+)
 import xml.etree.ElementTree as ET
 
 from canmatrix.canmatrix import CanMatrix, matrix_class
@@ -29,14 +34,12 @@ import lxml
 import numpy as np
 from numpy import arange, bool_, dtype, interp, where
 from numpy.typing import NDArray
+import pandas as pd
 from pandas import Series
-from typing_extensions import Literal, TypedDict
+from typing_extensions import Buffer, Literal, runtime_checkable, TypedDict, TypeIs
 
 from ..types import (
-    ChannelType,
-    DataGroupType,
     MDF_v2_v3_v4,
-    RasterType,
     ReadableBufferType,
     StrPathType,
 )
@@ -145,6 +148,13 @@ __all__ = [
     "matlab_compatible",
     "validate_version_argument",
 ]
+
+
+class BlockKwargs(TypedDict, total=False):
+    stream: BinaryIO | Buffer
+    mapped: bool
+    address: int
+
 
 CHANNEL_COUNT = (1000, 2000, 10000, 20000)
 _channel_count = arange(0, 20000, 1000, dtype="<u4")
@@ -316,11 +326,12 @@ def get_text_v4(
     address: int,
     stream: ReadableBufferType,
     mapped: bool = ...,
-    decode: Literal[False] = ...,
+    *,
+    decode: Literal[False],
 ) -> bytes: ...
 
 
-def get_text_v4(address: int, stream: ReadableBufferType, mapped: bool = False, decode: bool = True) -> str | bytes:
+def get_text_v4(address: int, stream: BinaryIO | Buffer, mapped: bool = False, decode: bool = True) -> str | bytes:
     """faster way to extract strings from mdf version 4 TextBlock
 
     Parameters
@@ -824,57 +835,6 @@ def as_non_byte_sized_signed_int(integer_array: NDArray[Any], bit_length: int) -
     )
 
 
-def debug_channel(
-    mdf: MDF_v2_v3_v4,
-    group: Group,
-    channel: ChannelType,
-    dependency: list[tuple[int, int]],
-    file: StringIO | None = None,
-) -> None:
-    """use this to print debug information in case of errors
-
-    Parameters
-    ----------
-    mdf : MDF
-        source MDF object
-    group : dict
-        group
-    channel : Channel
-        channel object
-    dependency : ChannelDependency
-        channel dependency object
-
-    """
-    print("MDF", "=" * 76, file=file)
-    print("name:", mdf.name, file=file)
-    print("version:", mdf.version, file=file)
-    print("read fragment size:", mdf._read_fragment_size, file=file)
-    print("write fragment size:", mdf._write_fragment_size, file=file)
-    print()
-
-    record = mdf._prepare_record(group)
-    print("GROUP", "=" * 74, file=file)
-    print("sorted:", group["sorted"], file=file)
-    print("data location:", group["data_location"], file=file)
-    print("data blocks:", group.data_blocks, file=file)
-    print("dependencies", group["channel_dependencies"], file=file)
-    print("record:", record, file=file)
-    print(file=file)
-
-    cg = group["channel_group"]
-    print("CHANNEL GROUP", "=" * 66, file=file)
-    print(cg, cg.cycles_nr, cg.samples_byte_nr, cg.invalidation_bytes_nr, file=file)
-    print(file=file)
-
-    print("CHANNEL", "=" * 72, file=file)
-    print(channel, file=file)
-    print(file=file)
-
-    print("CHANNEL ARRAY", "=" * 66, file=file)
-    print(dependency, file=file)
-    print(file=file)
-
-
 def count_channel_groups(
     stream: ReadableBufferType, include_channels: bool = False, mapped: bool = False
 ) -> tuple[int, int]:
@@ -996,7 +956,10 @@ def count_channel_groups(
     return count, ch_count
 
 
-def validate_version_argument(version: str, hint: int = 4) -> str:
+_T = TypeVar("_T", bound=str)
+
+
+def validate_version_argument(version: _T, hint: _T) -> _T:
     """validate the version argument against the supported MDF versions. The
     default version used depends on the hint MDF major revision
 
@@ -1014,12 +977,7 @@ def validate_version_argument(version: str, hint: int = 4) -> str:
 
     """
     if version not in SUPPORTED_VERSIONS:
-        if hint == 2:
-            valid_version = "2.14"
-        elif hint == 3:
-            valid_version = "3.30"
-        else:
-            valid_version = "4.10"
+        valid_version = hint
         message = 'Unknown mdf version "{}".' " The available versions are {};" ' automatically using version "{}"'
         message = message.format(version, SUPPORTED_VERSIONS, valid_version)
         logger.warning(message)
@@ -1076,7 +1034,14 @@ def randomized_string(size: int) -> bytes:
     return bytes(randint(65, 90) for _ in range(size - 1)) + b"\0"
 
 
-def is_file_like(obj: object) -> bool:
+@runtime_checkable
+class FileLike(Protocol):
+    def read(self, size: int | None = ..., /) -> bytes: ...
+    def seek(self, offset: int, whence: int = ..., /) -> int: ...
+    def __iter__(self) -> Iterator[bytes]: ...
+
+
+def is_file_like(obj: object) -> TypeIs[FileLike]:
     """
     Check if the object is a file-like object.
 
@@ -1104,13 +1069,7 @@ def is_file_like(obj: object) -> bool:
     >>> is_file_like([1, 2, 3])
     False
     """
-    if not (hasattr(obj, "read") and hasattr(obj, "seek")):
-        return False
-
-    if not hasattr(obj, "__iter__"):
-        return False
-
-    return True
+    return isinstance(obj, FileLike)
 
 
 class UniqueDB:
@@ -1219,91 +1178,6 @@ def get_video_stream_duration(stream: bytes) -> float | None:
     return result
 
 
-class Group:
-    __slots__ = (
-        "channel_dependencies",
-        "channel_group",
-        "channels",
-        "data_blocks",
-        "data_blocks_info_generator",
-        "data_group",
-        "data_location",
-        "index",
-        "read_split_count",
-        "record",
-        "record_size",
-        "record_size",
-        "signal_data",
-        "signal_types",
-        "single_channel_dtype",
-        "sorted",
-        "string_dtypes",
-        "trigger",
-        "uses_ld",
-        "uuid",
-    )
-
-    def __init__(self, data_group: DataGroupType) -> None:
-        self.data_group = data_group
-        self.channels = []
-        self.channel_dependencies = []
-        self.signal_data = []
-        self.record = None
-        self.trigger = None
-        self.string_dtypes = None
-        self.data_blocks = []
-        self.single_channel_dtype = None
-        self.uses_ld = False
-        self.read_split_count = 0
-        self.data_blocks_info_generator = iter(EMPTY_TUPLE)
-        self.uuid = ""
-        self.index = 0
-
-    def __getitem__(self, item: str) -> Any:
-        return self.__getattribute__(item)
-
-    def __setitem__(self, item: str, value: Any) -> None:
-        self.__setattr__(item, value)
-
-    def set_blocks_info(self, info: list[DataBlockInfo]) -> None:
-        self.data_blocks = info
-
-    def __contains__(self, item: str) -> bool:
-        return hasattr(self, item)
-
-    def clear(self) -> None:
-        self.data_blocks.clear()
-        self.channels.clear()
-        self.channel_dependencies.clear()
-        self.signal_data.clear()
-        self.data_blocks_info_generator = None
-
-    def get_data_blocks(self) -> Iterator[DataBlockInfo]:
-        yield from self.data_blocks
-
-        while True:
-            try:
-                info = next(self.data_blocks_info_generator)
-                self.data_blocks.append(info)
-                yield info
-            except StopIteration:
-                break
-
-    def get_signal_data_blocks(self, index: int) -> Iterator[SignalDataBlockInfo]:
-        signal_data = self.signal_data[index]
-        if signal_data is not None:
-            signal_data, signal_generator = signal_data
-            yield from signal_data
-
-            while True:
-                try:
-                    info = next(signal_generator)
-                    signal_data.append(info)
-                    yield info
-                except StopIteration:
-                    break
-
-
 class VirtualChannelGroup:
     """starting with MDF v4.20 it is possible to use remote masters and column
     oriented storage. This means we now have virtual channel groups that can
@@ -1345,9 +1219,9 @@ def components(
     channel_name: str,
     unique_names: UniqueDB,
     prefix: str = "",
-    master: NDArray[Any] | None = None,
+    master: pd.Index[float] | pd.Index[int] | None = None,
     only_basenames: bool = False,
-) -> tuple[str, Series[Any]]:
+) -> Iterator[tuple[str, Series[Any]]]:
     """yield pandas Series and unique name based on the ndarray object
 
     Parameters
@@ -1360,7 +1234,7 @@ def components(
         unique names object
     prefix : str
         prefix used in case of nested recarrays
-    master : np.array
+    master : pd.Index
         optional index for the Series
     only_basenames (False) : bool
         use just the field names, without prefix, for structures and channel
@@ -1614,7 +1488,7 @@ def downcast(array: NDArray[Any]) -> NDArray[Any]:
     return array
 
 
-def master_using_raster(mdf: MDF_v2_v3_v4, raster: RasterType, endpoint: bool = False) -> NDArray[Any]:
+def master_using_raster(mdf: MDF_v2_v3_v4, raster: float, endpoint: bool = False) -> NDArray[Any]:
     """get single master based on the raster
 
     Parameters
