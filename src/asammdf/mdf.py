@@ -31,6 +31,7 @@ from canmatrix import CanMatrix, Frame
 import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
+from pandas.api.extensions import ExtensionArray
 from typing_extensions import Literal
 
 from . import tool
@@ -1449,9 +1450,9 @@ class MDF:
                                 return TERMINATED
 
                     for i, (group_index, virtual_group) in enumerate(self._mdf.virtual_groups.items()):
-                        channels = self._mdf.included_channels(group_index)[group_index]
+                        included_channels = self._mdf.included_channels(group_index)[group_index]
 
-                        if not channels:
+                        if not included_channels:
                             continue
 
                         names = UniqueDB()
@@ -1496,16 +1497,16 @@ class MDF:
 
                         channels = [
                             (None, gp_index, ch_index)
-                            for gp_index, channel_indexes in channels.items()
+                            for gp_index, channel_indexes in included_channels.items()
                             for ch_index in channel_indexes
                         ]
 
                         if not channels:
                             continue
 
-                        channels = self.select(channels, raw=raw)
+                        signals = self.select(channels, raw=raw)
 
-                        for j, sig in enumerate(channels):
+                        for j, sig in enumerate(signals):
                             if use_display_names:
                                 name = list(sig.display_names)[0] if sig.display_names else sig.name
                             else:
@@ -1794,7 +1795,7 @@ class MDF:
 
                     return dct
 
-                mdict: dict[str, NDArray[Any]] = {}
+                mdict: dict[str, ExtensionArray | NDArray[Any]] = {}
 
                 master_name_template = "DGM{}_{}"
                 channel_name_template = "DG{}_{}"
@@ -1813,35 +1814,35 @@ class MDF:
                             return TERMINATED
 
                 for i, (group_index, virtual_group) in enumerate(self._mdf.virtual_groups.items()):
-                    if progress is not None and progress.stop:
+                    if progress is not None and not callable(progress) and progress.stop:
                         return TERMINATED
 
-                    channels = self._mdf.included_channels(group_index)[group_index]
+                    included_channels = self._mdf.included_channels(group_index)[group_index]
 
-                    if not channels:
+                    if not included_channels:
                         continue
 
                     channels = [
                         (None, gp_index, ch_index)
-                        for gp_index, channel_indexes in channels.items()
+                        for gp_index, channel_indexes in included_channels.items()
                         for ch_index in channel_indexes
                     ]
 
                     if not channels:
                         continue
 
-                    channels = self.select(
+                    signals = self.select(
                         channels,
                         ignore_value2text_conversions=ignore_value2text_conversions,
                         raw=raw,
                     )
 
-                    master = channels[0].copy()
+                    master = signals[0].copy()
                     master.samples = master.timestamps
 
-                    channels.insert(0, master)
+                    signals.insert(0, master)
 
-                    for j, sig in enumerate(channels):
+                    for j, sig in enumerate(signals):
                         if j == 0:
                             channel_name = master_name_template.format(i, "timestamps")
                         else:
@@ -1855,7 +1856,7 @@ class MDF:
                         channel_name = used_names.get_unique_name(channel_name)
 
                         if sig.samples.dtype.names:
-                            sig.samples.dtype.names = [matlab_compatible(name) for name in sig.samples.dtype.names]
+                            sig.samples.dtype.names = tuple(matlab_compatible(name) for name in sig.samples.dtype.names)
 
                             sigs = decompose(sig.samples)
 
@@ -2414,12 +2415,12 @@ class MDF:
                         if progress.stop:
                             return TERMINATED
 
-                if first_version >= "4.00":
-                    w_mdf = first_mdf
+                if isinstance(first_mdf._mdf, mdf_v4.MDF4):
+                    w_mdf = first_mdf._mdf
 
                     vlds_channels = []
 
-                    for _gp_idx, _gp in enumerate(w_mdf._mdf.groups):
+                    for _gp_idx, _gp in enumerate(w_mdf.groups):
                         for _ch_idx, _ch in enumerate(_gp.channels):
                             if _ch.channel_type == v4c.CHANNEL_TYPE_VLSD:
                                 vlds_channels.append((_ch.name, _gp_idx, _ch_idx))
@@ -2438,7 +2439,7 @@ class MDF:
 
                             for _ch_name, _gp_idx, _ch_idx in vlds_channels:
                                 key = (_ch_name, _gp_idx)
-                                for _second_gp_idx, _second_ch_idx in w_mdf.whereis(_ch_name):
+                                for _second_gp_idx, _second_ch_idx in first_mdf.whereis(_ch_name):
                                     if _second_gp_idx == _gp_idx:
                                         vlsd_max_length[key] = max(
                                             vlsd_max_length[key],
@@ -4931,16 +4932,18 @@ class MDF:
             use_display_names=True,
         )
 
-        if not isinstance(out._mdf, mdf_v4.MDF4):
+        if isinstance(out._mdf, mdf_v4.MDF4):
+            out_mdf = out._mdf
+        else:
             raise MdfException("The method `extract_bus_logging` is only available for MDF4 files")
 
-        out._mdf.header.start_time = self._mdf.header.start_time
+        out_mdf.header.start_time = self._mdf.header.start_time
 
         self._mdf.last_call_info = {}
 
         if database_files.get("CAN", None):
             to_keep_or_terminated = self._extract_can_logging(
-                out._mdf,
+                out_mdf,
                 database_files["CAN"],
                 ignore_value2text_conversion,
                 prefix,
@@ -4949,11 +4952,11 @@ class MDF:
 
             if isinstance(to_keep_or_terminated, list):
                 if to_keep_or_terminated:
-                    tmp = out.filter(to_keep_or_terminated, out._mdf.version)
-                    out._mdf.close()
+                    tmp = out.filter(to_keep_or_terminated, out_mdf.version)
+                    out_mdf.close()
                     out = tmp
 
-                    if not out._mdf.groups:
+                    if not out_mdf.groups:
                         logger.warning(
                             f'No CAN signals could be extracted from "{self._mdf.name}". The'
                             "output file will be empty."
@@ -4965,7 +4968,7 @@ class MDF:
 
         if database_files.get("LIN", None):
             terminated = self._extract_lin_logging(
-                out._mdf,
+                out_mdf,
                 database_files["LIN"],
                 ignore_value2text_conversion,
                 prefix,
