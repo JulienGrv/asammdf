@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import bz2
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Hashable, Iterable, Iterator, Sequence
 from copy import deepcopy
 import csv
 from datetime import datetime, timezone
@@ -23,6 +23,7 @@ from traceback import format_exc
 from types import TracebackType
 import typing
 from typing import Any, BinaryIO, Optional, overload, Union
+import warnings
 from warnings import warn
 import xml.etree.ElementTree as ET
 import zipfile
@@ -35,13 +36,15 @@ from pandas.api.extensions import ExtensionArray
 from typing_extensions import Literal
 
 from . import tool
-from .blocks import bus_logging_utils, mdf_v2, mdf_v3, mdf_v4
+from .blocks import bus_logging_utils, mdf_v2, mdf_v3, mdf_v4, v2_v3_blocks, v4_blocks
 from .blocks import v2_v3_constants as v23c
 from .blocks import v4_constants as v4c
 from .blocks.conversion_utils import from_dict
+from .blocks.mdf_common import Group
 from .blocks.options import FloatInterpolation, IntegerInterpolation
 from .blocks.source_utils import Source
 from .blocks.utils import (
+    ChannelsDB,
     components,
     csv_bytearray2hex,
     csv_int2hex,
@@ -80,6 +83,7 @@ from .types import (
     BusType,
     ChannelGroupType,
     ChannelsType,
+    CompressionType,
     DbcFileType,
     EmptyChannelsType,
     FloatInterpolationModeType,
@@ -87,6 +91,7 @@ from .types import (
     RasterType,
     StrOrBytesPathType,
     StrPathType,
+    WritableBufferType,
 )
 
 try:
@@ -362,9 +367,19 @@ class MDF:
         if item == "_mdf":
             super().__setattr__(item, value)
         else:
+            warnings.warn(
+                "accessing an attribute from the underlying '_mdf' object might be deprecated in the future in favor of a public method on the MDF class. If no public method is available yet, please open a pull request to add it.",
+                category=PendingDeprecationWarning,
+                stacklevel=2,
+            )
             setattr(self._mdf, item, value)
 
     def __getattr__(self, item: str) -> Any:
+        warnings.warn(
+            "accessing an attribute from the underlying '_mdf' object might be deprecated in the future in favor of a public method on the MDF class. If no public method is available yet, please open a pull request to add it.",
+            category=PendingDeprecationWarning,
+            stacklevel=2,
+        )
         return getattr(self._mdf, item)
 
     def __dir__(self) -> list[str]:
@@ -587,7 +602,7 @@ class MDF:
     <tool_version>{tool.__version__}</tool_version>
 </FHcomment>"""
 
-            self.file_history = [fh]
+            self._mdf.file_history = [fh]
 
     @staticmethod
     def _transfer_channel_group_data(sgroup: ChannelGroupType, ogroup: ChannelGroupType) -> None:
@@ -616,6 +631,18 @@ class MDF:
 
         """
         yield from self.iter_channels()
+
+    @property
+    def version(self) -> Version:
+        return self._mdf.version
+
+    @property
+    def groups(self) -> list[Group]:
+        return self._mdf.groups
+
+    @property
+    def channels_db(self) -> ChannelsDB:
+        return self._mdf.channels_db
 
     def configure(
         self,
@@ -708,45 +735,274 @@ class MDF:
         """
 
         if from_other is not None:
-            self._read_fragment_size = from_other._read_fragment_size
-            self._write_fragment_size = from_other._write_fragment_size
-            self._use_display_names = from_other._use_display_names
-            self._single_bit_uint_as_bool = from_other._single_bit_uint_as_bool
-            self._integer_interpolation = from_other._integer_interpolation
-            self.copy_on_get = from_other.copy_on_get
-            self._float_interpolation = from_other._float_interpolation
-            self._raise_on_multiple_occurrences = from_other._raise_on_multiple_occurrences
+            self._mdf._read_fragment_size = from_other._mdf._read_fragment_size
+            self._mdf._write_fragment_size = from_other._mdf._write_fragment_size
+            self._mdf._use_display_names = from_other._mdf._use_display_names
+            self._mdf._single_bit_uint_as_bool = from_other._mdf._single_bit_uint_as_bool
+            self._mdf._integer_interpolation = from_other._mdf._integer_interpolation
+            self._mdf.copy_on_get = from_other._mdf.copy_on_get
+            self._mdf._float_interpolation = from_other._mdf._float_interpolation
+            self._mdf._raise_on_multiple_occurrences = from_other._mdf._raise_on_multiple_occurrences
 
         if read_fragment_size is not None:
-            self._read_fragment_size = int(read_fragment_size)
+            self._mdf._read_fragment_size = int(read_fragment_size)
 
         if write_fragment_size is not None:
-            self._write_fragment_size = min(int(write_fragment_size), 4 * 1024 * 1024)
+            self._mdf._write_fragment_size = min(int(write_fragment_size), 4 * 1024 * 1024)
 
         if use_display_names is not None:
-            self._use_display_names = bool(use_display_names)
+            self._mdf._use_display_names = bool(use_display_names)
 
         if single_bit_uint_as_bool is not None:
-            self._single_bit_uint_as_bool = bool(single_bit_uint_as_bool)
+            self._mdf._single_bit_uint_as_bool = bool(single_bit_uint_as_bool)
 
         if integer_interpolation is not None:
-            self._integer_interpolation = IntegerInterpolation(integer_interpolation)
+            self._mdf._integer_interpolation = IntegerInterpolation(integer_interpolation)
 
         if copy_on_get is not None:
-            self.copy_on_get = copy_on_get
+            self._mdf.copy_on_get = copy_on_get
 
         if float_interpolation is not None:
-            self._float_interpolation = FloatInterpolation(float_interpolation)
+            self._mdf._float_interpolation = FloatInterpolation(float_interpolation)
 
         if temporary_folder is not None:
             try:
                 os.makedirs(temporary_folder, exist_ok=True)
-                self.temporary_folder = temporary_folder
+                self._mdf.temporary_folder = temporary_folder
             except:
-                self.temporary_folder = None
+                self._mdf.temporary_folder = None
 
         if raise_on_multiple_occurrences is not None:
-            self._raise_on_multiple_occurrences = bool(raise_on_multiple_occurrences)
+            self._mdf._raise_on_multiple_occurrences = bool(raise_on_multiple_occurrences)
+
+    @overload
+    def append(
+        self,
+        signals: list[Signal] | Signal,
+        acq_name: str | None = ...,
+        acq_source: Source | None = ...,
+        comment: str = ...,
+        common_timebase: bool = ...,
+        units: dict[str, str | bytes] | None = ...,
+    ) -> int: ...
+
+    @overload
+    def append(
+        self,
+        signals: pd.DataFrame,
+        acq_name: str | None = ...,
+        acq_source: Source | None = ...,
+        comment: str = ...,
+        common_timebase: bool = ...,
+        units: dict[str, str | bytes] | None = ...,
+    ) -> None: ...
+
+    def append(
+        self,
+        signals: list[Signal] | Signal | pd.DataFrame,
+        acq_name: str | None = None,
+        acq_source: Source | None = None,
+        comment: str = "Python",
+        common_timebase: bool = False,
+        units: dict[str, str | bytes] | None = None,
+    ) -> int | None:
+        if isinstance(self._mdf, mdf_v4.MDF4):
+            return self._mdf.append(
+                signals=signals,
+                acq_name=acq_name,
+                acq_source=acq_source,
+                comment=comment,
+                common_timebase=common_timebase,
+                units=units,
+            )
+        return self._mdf.append(signals=signals, comment=comment, common_timebase=common_timebase, units=units)
+
+    def attach(
+        self,
+        data: bytes,
+        file_name: str | None = None,
+        hash_sum: bytes | None = None,
+        comment: str = "",
+        compression: bool = True,
+        mime: str = r"application/octet-stream",
+        embedded: bool = True,
+        password: str | bytes | None = None,
+    ) -> int:
+        if isinstance(self._mdf, mdf_v4.MDF4):
+            return self._mdf.attach(
+                data,
+                file_name=file_name,
+                hash_sum=hash_sum,
+                comment=comment,
+                compression=compression,
+                mime=mime,
+                embedded=embedded,
+                password=password,
+            )
+        raise MdfException("attach is only supported for MDF4 files")
+
+    def close(self) -> None:
+        return self._mdf.close()
+
+    def extract_attachment(
+        self,
+        index: int | None = None,
+        password: str | bytes | None = None,
+    ) -> tuple[bytes, Path, bytes]:
+        if isinstance(self._mdf, mdf_v4.MDF4):
+            return self._mdf.extract_attachment(index=index, password=password)
+        raise MdfException("extract_attachment is only supported for MDF4 files")
+
+    @overload
+    def get(
+        self,
+        name: str | None = ...,
+        group: int | None = ...,
+        index: int | None = ...,
+        raster: RasterType | None = ...,
+        samples_only: Literal[False] = ...,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
+        raw: bool = ...,
+        ignore_invalidation_bits: bool = ...,
+        record_offset: int = ...,
+        record_count: int | None = ...,
+        skip_channel_validation: bool = ...,
+    ) -> Signal: ...
+
+    @overload
+    def get(
+        self,
+        name: str | None = ...,
+        group: int | None = ...,
+        index: int | None = ...,
+        raster: RasterType | None = ...,
+        samples_only: Literal[True] = ...,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
+        raw: bool = ...,
+        ignore_invalidation_bits: bool = ...,
+        record_offset: int = ...,
+        record_count: int | None = ...,
+        skip_channel_validation: bool = ...,
+    ) -> tuple[NDArray[Any], NDArray[Any]]: ...
+
+    @overload
+    def get(
+        self,
+        name: str | None = ...,
+        group: int | None = ...,
+        index: int | None = ...,
+        raster: RasterType | None = ...,
+        samples_only: bool = ...,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
+        raw: bool = ...,
+        ignore_invalidation_bits: bool = ...,
+        record_offset: int = ...,
+        record_count: int | None = ...,
+        skip_channel_validation: bool = ...,
+    ) -> Signal | tuple[NDArray[Any], NDArray[Any]]: ...
+
+    def get(
+        self,
+        name: str | None = None,
+        group: int | None = None,
+        index: int | None = None,
+        raster: RasterType | None = None,
+        samples_only: bool = False,
+        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = None,
+        raw: bool = False,
+        ignore_invalidation_bits: bool = False,
+        record_offset: int = 0,
+        record_count: int | None = None,
+        skip_channel_validation: bool = False,
+    ) -> Signal | tuple[NDArray[Any], NDArray[Any] | None]:
+        if isinstance(self._mdf, mdf_v4.MDF4):
+            return self._mdf.get(
+                name=name,
+                group=group,
+                index=index,
+                raster=raster,
+                samples_only=samples_only,
+                data=data,
+                raw=raw,
+                ignore_invalidation_bits=ignore_invalidation_bits,
+                record_offset=record_offset,
+                record_count=record_count,
+                skip_channel_validation=skip_channel_validation,
+            )
+        return self._mdf.get(
+            name=name,
+            group=group,
+            index=index,
+            raster=raster,
+            samples_only=samples_only,
+            data=data,
+            raw=raw,
+            record_offset=record_offset,
+            record_count=record_count,
+            skip_channel_validation=skip_channel_validation,
+        )
+
+    def get_can_signal(
+        self,
+        name: str,
+        database: CanMatrix | StrPathType | None = None,
+        ignore_invalidation_bits: bool = False,
+        data: bytes | None = None,
+        raw: bool = False,
+        ignore_value2text_conversion: bool = True,
+    ) -> Signal:
+        if isinstance(self._mdf, mdf_v4.MDF4):
+            return self._mdf.get_can_signal(
+                name=name,
+                database=database,
+                ignore_invalidation_bits=ignore_invalidation_bits,
+                data=data,
+                raw=raw,
+                ignore_value2text_conversion=ignore_value2text_conversion,
+            )
+        raise MdfException("get_can_signal is only supported for MDF4 files")
+
+    def get_lin_signal(
+        self,
+        name: str,
+        database: CanMatrix | StrPathType | None = None,
+        ignore_invalidation_bits: bool = False,
+        data: bytes | None = None,
+        raw: bool = False,
+        ignore_value2text_conversion: bool = True,
+    ) -> Signal:
+        if isinstance(self._mdf, mdf_v4.MDF4):
+            return self._mdf.get_lin_signal(
+                name=name,
+                database=database,
+                ignore_invalidation_bits=ignore_invalidation_bits,
+                data=data,
+                raw=raw,
+                ignore_value2text_conversion=ignore_value2text_conversion,
+            )
+        raise MdfException("get_lin_signal is only supported for MDF4 files")
+
+    def get_bus_signal(
+        self,
+        bus: BusType,
+        name: str,
+        database: CanMatrix | StrPathType | None = None,
+        ignore_invalidation_bits: bool = False,
+        data: bytes | None = None,
+        raw: bool = False,
+        ignore_value2text_conversion: bool = True,
+    ) -> Signal:
+        if isinstance(self._mdf, mdf_v4.MDF4):
+            return self._mdf.get_bus_signal(
+                bus=bus,
+                name=name,
+                database=database,
+                ignore_invalidation_bits=ignore_invalidation_bits,
+                data=data,
+                raw=raw,
+                ignore_value2text_conversion=ignore_value2text_conversion,
+            )
+        raise MdfException("get_bus_signal is only supported for MDF4 files")
 
     def convert(self, version: Version, progress=None) -> MDF | object:
         """convert *MDF* to other version
@@ -836,7 +1092,7 @@ class MDF:
         include_ends: bool = True,
         time_from_zero: bool = False,
         progress=None,
-    ) -> MDF:
+    ) -> MDF | object:
         """cut *MDF* file. *start* and *stop* limits are absolute values
         or values relative to the first timestamp depending on the *whence*
         argument.
@@ -883,8 +1139,8 @@ class MDF:
             **self._mdf._kwargs,
         )
 
-        integer_interpolation_mode = self._integer_interpolation
-        float_interpolation_mode = self._float_interpolation
+        integer_interpolation_mode = self._mdf._integer_interpolation
+        float_interpolation_mode = self._mdf._float_interpolation
         out.configure(from_other=self)
 
         self.configure(copy_on_get=False)
@@ -907,6 +1163,8 @@ class MDF:
                 stop += first_timestamp
 
         if time_from_zero:
+            if not start:
+                raise ValueError("start must be provided when time_from_zero is True")
             delta = start
             t_epoch = self._mdf.header.start_time.timestamp() + delta
             out._mdf.header.start_time = datetime.fromtimestamp(t_epoch)
@@ -935,10 +1193,11 @@ class MDF:
                 if not sigs:
                     break
                 if j == 0:
-                    master = sigs[0].timestamps
-                    signals = sigs
+                    signals = typing.cast(list[Signal], sigs)
+                    master = signals[0].timestamps
                 else:
-                    master = sigs[0][0]
+                    signal_samples = typing.cast(list[tuple[NDArray[Any], Optional[NDArray[Any]]]], sigs)
+                    master = signal_samples[0][0]
 
                 if not len(master):
                     continue
@@ -989,7 +1248,8 @@ class MDF:
 
                 # update the signal if this is not the first yield
                 if j:
-                    for signal, (samples, invalidation) in zip(signals, sigs[1:]):
+                    signal_samples = typing.cast(list[tuple[NDArray[Any], Optional[NDArray[Any]]]], sigs)
+                    for signal, (samples, invalidation) in zip(signals, signal_samples[1:]):
                         signal.samples = samples
                         signal.timestamps = master
                         signal.invalidation_bits = invalidation
@@ -1044,9 +1304,9 @@ class MDF:
                     MDF._transfer_channel_group_data(out._mdf.groups[cg_nr].channel_group, cg)
 
                 else:
-                    sigs = [(sig.samples, sig.invalidation_bits) for sig in signals]
-                    sigs.insert(0, (master, None))
-                    out._mdf.extend(cg_nr, sigs)
+                    signal_samples = [(sig.samples, sig.invalidation_bits) for sig in signals]
+                    signal_samples.insert(0, (master, None))
+                    out._mdf.extend(cg_nr, signal_samples)
 
                 idx += 1
 
@@ -1231,8 +1491,6 @@ class MDF:
             "subject_field",
         )
 
-        fmt = fmt.lower()
-
         if fmt != "pandas" and filename is None and self._mdf.name is None:
             message = "Must specify filename for export" "if MDF was created without a file name"
             logger.warning(message)
@@ -1267,14 +1525,14 @@ class MDF:
 
             except ImportError:
                 logger.warning("pyarrow not found; export to parquet is unavailable")
-                return
+                return None
 
         elif fmt == "hdf5":
             try:
                 from h5py import File as HDF5
             except ImportError:
                 logger.warning("h5py not found; export to HDF5 is unavailable")
-                return
+                return None
 
         elif fmt == "mat":
             if format == "7.3":
@@ -1282,13 +1540,13 @@ class MDF:
                     from hdf5storage import savemat
                 except ImportError:
                     logger.warning("hdf5storage not found; export to mat v7.3 is unavailable")
-                    return
+                    return None
             else:
                 try:
                     from scipy.io import savemat
                 except ImportError:
                     logger.warning("scipy not found; export to mat v4 and v5 is unavailable")
-                    return
+                    return None
 
         elif fmt not in ("csv", "asc"):
             raise MdfException(f"Export to {fmt} is not implemented")
@@ -1317,8 +1575,8 @@ class MDF:
                 raw=raw,
                 numeric_1D_only=fmt == "parquet",
             )
-            units = {}
-            comments = {}
+            units: dict[Hashable, str] = {}
+            comments: dict[Hashable, str] = {}
             used_names = UniqueDB()
 
             groups_nr = len(self._mdf.groups)
@@ -1332,9 +1590,16 @@ class MDF:
                         return TERMINATED
 
             for i, grp in enumerate(self._mdf.groups):
-                if progress is not None and progress.stop:
+                if progress is not None and not callable(progress) and progress.stop:
                     return TERMINATED
 
+                grp = typing.cast(
+                    Union[
+                        Group[v2_v3_blocks.DataGroup, v2_v3_blocks.ChannelGroup, v2_v3_blocks.Channel],
+                        Group[v4_blocks.DataGroup, v4_blocks.ChannelGroup, v4_blocks.Channel],
+                    ],
+                    grp,
+                )
                 for ch in grp.channels:
                     if use_display_names:
                         channel_name = list(ch.display_names)[0] if ch.display_names else ch.name
@@ -1393,13 +1658,14 @@ class MDF:
                                 return TERMINATED
 
                     for i, channel in enumerate(df):
-                        samples = df[channel]
+                        series = df[channel]
                         unit = units.get(channel, "")
                         comment = comments.get(channel, "")
 
-                        if samples.dtype.kind == "O":
-                            if isinstance(samples[0], np.ndarray):
-                                samples = np.vstack(samples)
+                        if series.dtype.kind == "O":
+                            if isinstance(series[0], np.ndarray):
+                                arrays = typing.cast(Sequence[NDArray[Any]], series)
+                                samples = np.vstack(arrays)
                             else:
                                 continue
 
@@ -1456,7 +1722,7 @@ class MDF:
                             continue
 
                         names = UniqueDB()
-                        if progress is not None and progress.stop:
+                        if progress is not None and not callable(progress) and progress.stop:
                             return TERMINATED
 
                         if len(virtual_group.groups) == 1:
@@ -1574,12 +1840,12 @@ class MDF:
                     units["timestamps"] = "s"
 
                 if hasattr(self, "can_logging_db") and self.can_logging_db:
-                    dropped = {}
+                    dropped: dict[str, pd.Series[str]] = {}
 
                     for name_ in df.columns:
                         if name_.endswith("CAN_DataFrame.ID"):
                             dropped[name_] = pd.Series(
-                                csv_int2hex(df[name_].astype("<u4") & 0x1FFFFFFF),
+                                csv_int2hex(df[name_].astype(np.dtype("<u4")) & 0x1FFFFFFF),
                                 index=df.index,
                             )
 
@@ -1614,6 +1880,7 @@ class MDF:
                                 except:
                                     continue
 
+                    vals: list[Iterable[Any]]
                     if reduce_memory_usage:
                         vals = [df.index, *(df[name] for name in df)]
                     else:
@@ -1662,7 +1929,7 @@ class MDF:
                             return TERMINATED
 
                 for i, (group_index, virtual_group) in enumerate(self._mdf.virtual_groups.items()):
-                    if progress is not None and progress.stop:
+                    if progress is not None and not callable(progress) and progress.stop:
                         return TERMINATED
 
                     message = f"Exporting group {i+1} of {gp_count}"
@@ -1968,6 +2235,8 @@ class MDF:
             message.format(fmt)
             logger.warning(message)
 
+        return None
+
     @overload
     def filter(self, channels: ChannelsType, version: Version | None = ..., progress: None = ...) -> MDF: ...
 
@@ -2051,8 +2320,8 @@ class MDF:
         else:
             version = validate_version_argument(version, self._mdf.default_version)
 
-        _raise_on_multiple_occurrences = self._raise_on_multiple_occurrences
-        self._raise_on_multiple_occurrences = False
+        _raise_on_multiple_occurrences = self._mdf._raise_on_multiple_occurrences
+        self._mdf._raise_on_multiple_occurrences = False
 
         names_map: dict[tuple[int, int], str] = {}
         for item in channels:
@@ -2071,7 +2340,7 @@ class MDF:
                 else:
                     continue
             names_map[entry] = name
-        self._raise_on_multiple_occurrences = _raise_on_multiple_occurrences
+        self._mdf._raise_on_multiple_occurrences = _raise_on_multiple_occurrences
 
         # group channels by group index
         gps = self._mdf.included_channels(channels=channels)
@@ -2111,7 +2380,7 @@ class MDF:
                 if entry in names_map:
                     sig.name = names_map[entry]
             cg = self._mdf.groups[group_index].channel_group
-            cg_nr = mdf._mdf.append(
+            cg_nr = mdf.append(
                 sigs,
                 common_timebase=True,
                 comment=cg.comment,
@@ -3227,8 +3496,8 @@ class MDF:
             **self._mdf._kwargs,
         )
 
-        integer_interpolation_mode = self._integer_interpolation
-        float_interpolation_mode = self._float_interpolation
+        integer_interpolation_mode = self._mdf._integer_interpolation
+        float_interpolation_mode = self._mdf._float_interpolation
         mdf.configure(from_other=self)
 
         mdf._mdf.header.start_time = self._mdf.header.start_time
@@ -5009,7 +5278,7 @@ class MDF:
 
         count = sum(
             1
-            for group in self.groups
+            for group in self._mdf.groups
             if group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
             and group.channel_group.acq_source.bus_type == v4c.BUS_TYPE_CAN
         )
@@ -5071,7 +5340,7 @@ class MDF:
 
             msg_map = {}
 
-            for i, group in enumerate(self.groups):
+            for i, group in enumerate(self._mdf.groups):
                 if (
                     not group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
                     or group.channel_group.acq_source.bus_type != v4c.BUS_TYPE_CAN
@@ -5079,28 +5348,28 @@ class MDF:
                 ):
                     continue
 
-                self._prepare_record(group)
-                data = self._load_data(group, optimize_read=False)
+                self._mdf._prepare_record(group)
+                data = self._mdf._load_data(group, optimize_read=False)
 
                 for fragment in data:
-                    self._set_temporary_master(None)
-                    self._set_temporary_master(self.get_master(i, data=fragment))
+                    self._mdf._set_temporary_master(None)
+                    self._mdf._set_temporary_master(self._mdf.get_master(i, data=fragment))
 
-                    bus_ids = self.get(
+                    bus_ids = self._mdf.get(
                         "CAN_DataFrame.BusChannel",
                         group=i,
                         data=fragment,
                     ).samples.astype("<u1")
 
-                    msg_ids = self.get("CAN_DataFrame.ID", group=i, data=fragment).astype("<u4")
+                    msg_ids = self._mdf.get("CAN_DataFrame.ID", group=i, data=fragment).astype("<u4")
                     try:
-                        msg_ide = self.get("CAN_DataFrame.IDE", group=i, data=fragment).samples.astype("<u1")
+                        msg_ide = self._mdf.get("CAN_DataFrame.IDE", group=i, data=fragment).samples.astype("<u1")
                     except:
                         msg_ide = (msg_ids & 0x80000000) >> 31
 
                     msg_ids &= 0x1FFFFFFF
 
-                    data_bytes = self.get(
+                    data_bytes = self._mdf.get(
                         "CAN_DataFrame.DataBytes",
                         group=i,
                         data=fragment,
@@ -5306,7 +5575,7 @@ class MDF:
                                     signal_samples.insert(0, (t, None))
 
                                     out.extend(index, signal_samples)
-                    self._set_temporary_master(None)
+                    self._mdf._set_temporary_master(None)
 
                 cntr += 1
                 if progress is not None:
@@ -5323,7 +5592,7 @@ class MDF:
 
         unknown_ids = {msg_id for msg_id, not_found in unknown_ids_dict.items() if all(not_found)}
 
-        self.last_call_info["CAN"] = {
+        self._mdf.last_call_info["CAN"] = {
             "dbc_files": dbc_files,
             "total_unique_ids": total_unique_ids,
             "unknown_id_count": len(unknown_ids),
@@ -5376,7 +5645,7 @@ class MDF:
 
         count = sum(
             1
-            for group in self.groups
+            for group in self._mdf.groups
             if group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
             and group.channel_group.acq_source.bus_type == v4c.BUS_TYPE_LIN
         )
@@ -5406,7 +5675,14 @@ class MDF:
 
             msg_map = {}
 
-            for i, group in enumerate(self.groups):
+            for i, group in enumerate(self._mdf.groups):
+                group = typing.cast(
+                    Union[
+                        Group[v2_v3_blocks.DataGroup, v2_v3_blocks.ChannelGroup, v2_v3_blocks.Channel],
+                        Group[v4_blocks.DataGroup, v4_blocks.ChannelGroup, v4_blocks.Channel],
+                    ],
+                    group,
+                )
                 if (
                     not group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
                     or group.channel_group.acq_source.bus_type != v4c.BUS_TYPE_LIN
@@ -5414,25 +5690,25 @@ class MDF:
                 ):
                     continue
 
-                self._prepare_record(group)
-                data = self._load_data(group, optimize_read=False)
+                self._mdf._prepare_record(group)  # type: ignore[arg-type]
+                data = self._mdf._load_data(group, optimize_read=False)  # type: ignore[arg-type]
 
                 for fragment in data:
-                    self._set_temporary_master(None)
-                    self._set_temporary_master(self.get_master(i, data=fragment))
+                    self._mdf._set_temporary_master(None)
+                    self._mdf._set_temporary_master(self._mdf.get_master(i, data=fragment))
 
-                    msg_ids = self.get("LIN_Frame.ID", group=i, data=fragment).astype("<u4") & 0x1FFFFFFF
+                    msg_ids = self._mdf.get("LIN_Frame.ID", group=i, data=fragment).astype("<u4") & 0x1FFFFFFF
 
                     original_ids = msg_ids.samples.copy()
 
-                    data_bytes = self.get(
+                    data_bytes = self._mdf.get(
                         "LIN_Frame.DataBytes",
                         group=i,
                         data=fragment,
                     ).samples
 
                     try:
-                        bus_ids = self.get(
+                        bus_ids = self._mdf.get(
                             "LIN_Frame.BusChannel",
                             group=i,
                             data=fragment,
@@ -5565,7 +5841,7 @@ class MDF:
                                     signal_samples.insert(0, (t, None))
 
                                     out.extend(index, signal_samples)
-                    self._set_temporary_master(None)
+                    self._mdf._set_temporary_master(None)
 
                 cntr += 1
                 if progress is not None:
@@ -5582,7 +5858,7 @@ class MDF:
 
         unknown_ids = {msg_id for msg_id, not_found in unknown_ids_dict.items() if all(not_found)}
 
-        self.last_call_info["LIN"] = {
+        self._mdf.last_call_info["LIN"] = {
             "dbc_files": dbc_files,
             "total_unique_ids": total_unique_ids,
             "unknown_id_count": len(unknown_ids),
@@ -5592,7 +5868,9 @@ class MDF:
         }
 
         if not out.groups:
-            logger.warning(f'No LIN signals could be extracted from "{self.name}". The' "output file will be empty.")
+            logger.warning(
+                f'No LIN signals could be extracted from "{self._mdf.name}". The' "output file will be empty."
+            )
 
         return None
 
@@ -5612,6 +5890,32 @@ class MDF:
     @start_time.setter
     def start_time(self, timestamp: datetime) -> None:
         self._mdf.header.start_time = timestamp
+
+    def save(
+        self,
+        dst: WritableBufferType | StrPathType,
+        overwrite: bool = False,
+        compression: CompressionType = 0,
+        progress: Callable[[int, int], None] | Any | None = None,
+        add_history_block: bool = True,
+    ) -> Path | object:
+        if isinstance(dst, (os.PathLike, str)):
+            return self._mdf.save(
+                dst,
+                overwrite=overwrite,
+                compression=compression,
+                progress=progress,
+                add_history_block=add_history_block,
+            )
+        if isinstance(self._mdf, mdf_v4.MDF4):
+            return self._mdf.save(
+                dst,
+                overwrite=overwrite,
+                compression=compression,
+                progress=progress,
+                add_history_block=add_history_block,
+            )
+        raise MdfException("The method `save` for MDF2 and MDF3 files does not support writing to a buffer")
 
     def cleanup_timestamps(
         self,

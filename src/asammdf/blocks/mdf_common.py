@@ -4,20 +4,45 @@ ASAM MDF version 4 file format module
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections import defaultdict
+from collections.abc import Iterable, Iterator
 from io import StringIO
 import logging
 from typing import Any, Generic, TypeVar
 
 from numpy.typing import NDArray
+from typing_extensions import TypedDict
 
-from ..types import ChannelType, MDF_v2_v3_v4
+from ..types import ChannelType, DbcFileType, MDF_v2_v3_v4, StrPathType
 from . import v2_v3_blocks, v4_blocks
 from .utils import DataBlockInfo, EMPTY_TUPLE, MdfException, SignalDataBlockInfo
 
 logger = logging.getLogger("asammdf")
 
 __all__ = ["MDF_Common"]
+
+
+class CanBusInfo(TypedDict):
+    dbc_files: Iterable[DbcFileType]
+    total_unique_ids: set[tuple[int, bool]]
+    unknown_id_count: int
+    not_found_ids: defaultdict[StrPathType, list[tuple[tuple[int, bool] | int, str]]]
+    found_ids: defaultdict[StrPathType, set[tuple[tuple[int, int, bool], str]]]
+    unknown_ids: set[int | tuple[int, bool]]
+
+
+class LinBusInfo(TypedDict):
+    dbc_files: Iterable[DbcFileType]
+    total_unique_ids: set[tuple[int, ...]]
+    unknown_id_count: int
+    not_found_ids: defaultdict[StrPathType, list[tuple[int, str]]]
+    found_ids: defaultdict[StrPathType, set[tuple[int, str]]]
+    unknown_ids: set[int]
+
+
+class BusInfo(TypedDict, total=False):
+    CAN: CanBusInfo
+    LIN: LinBusInfo
 
 
 _DG = TypeVar("_DG", v2_v3_blocks.DataGroup, v4_blocks.DataGroup)

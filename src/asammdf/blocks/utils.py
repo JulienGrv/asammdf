@@ -19,13 +19,7 @@ import sys
 from tempfile import TemporaryDirectory
 from time import perf_counter
 from traceback import format_exc
-from typing import (
-    Any,
-    BinaryIO,
-    overload,
-    Protocol,
-    TypeVar,
-)
+from typing import Any, BinaryIO, overload, Protocol, TypeVar
 import xml.etree.ElementTree as ET
 
 from canmatrix.canmatrix import CanMatrix, matrix_class

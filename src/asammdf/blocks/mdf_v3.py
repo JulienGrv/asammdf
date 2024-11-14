@@ -49,7 +49,7 @@ from ..types import ChannelsType, CompressionType, RasterType, StrPathType
 from . import v2_v3_constants as v23c
 from .conversion_utils import conversion_transfer
 from .cutils import data_block_from_arrays, get_channel_raw_bytes
-from .mdf_common import Group, MDF_Common
+from .mdf_common import BusInfo, Group, MDF_Common
 from .options import get_global_option
 from .source_utils import Source
 from .utils import (
@@ -235,7 +235,7 @@ class MDF3(MDF_Common):
         self._si_map = {}
         self._cc_map = {}
 
-        self.last_call_info = None
+        self.last_call_info: BusInfo = {}
         self._master = None
 
         self.virtual_groups_map = {}
@@ -301,7 +301,7 @@ class MDF3(MDF_Common):
 
     def _load_data(
         self,
-        group: Group,
+        group: Group[DataGroup, ChannelGroup, Channel],
         record_offset: int = 0,
         record_count: int | None = None,
         optimize_read: bool = True,
@@ -511,7 +511,7 @@ class MDF3(MDF_Common):
         if not has_yielded:
             yield b"", 0, _count
 
-    def _prepare_record(self, group: Group) -> list:
+    def _prepare_record(self, group: Group[DataGroup, ChannelGroup, Channel]) -> list:
         """compute record list
 
         Parameters
@@ -1056,8 +1056,6 @@ class MDF3(MDF_Common):
     def append(
         self,
         signals: list[Signal] | Signal,
-        acq_name: str | None = ...,
-        acq_source: Source | None = ...,
         comment: str = ...,
         common_timebase: bool = ...,
         units: dict[str, str | bytes] | None = ...,
@@ -1067,8 +1065,6 @@ class MDF3(MDF_Common):
     def append(
         self,
         signals: DataFrame,
-        acq_name: str | None = ...,
-        acq_source: Source | None = ...,
         comment: str = ...,
         common_timebase: bool = ...,
         units: dict[str, str | bytes] | None = ...,
@@ -1077,8 +1073,6 @@ class MDF3(MDF_Common):
     def append(
         self,
         signals: list[Signal] | Signal | DataFrame,
-        acq_name: str | None = None,
-        acq_source: Source | None = None,
         comment: str = "Python",
         common_timebase: bool = False,
         units: dict[str, str | bytes] | None = None,
@@ -1094,10 +1088,6 @@ class MDF3(MDF_Common):
             list of *Signal* objects, or a single *Signal* object, or a pandas
             *DataFrame* object. All bytes columns in the pandas *DataFrame*
             must be *latin-1* encoded
-        acq_name : str
-            channel group acquisition name
-        acq_source : Source
-            channel group acquisition source
         comment : str
             channel group comment; default 'Python'
         common_timebase : bool
@@ -2753,7 +2743,6 @@ class MDF3(MDF_Common):
         samples_only: Literal[False] = ...,
         data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
         raw: bool = ...,
-        ignore_invalidation_bits: bool = ...,
         record_offset: int = ...,
         record_count: int | None = ...,
         skip_channel_validation: bool = ...,
@@ -2769,7 +2758,6 @@ class MDF3(MDF_Common):
         samples_only: Literal[True] = ...,
         data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
         raw: bool = ...,
-        ignore_invalidation_bits: bool = ...,
         record_offset: int = ...,
         record_count: int | None = ...,
         skip_channel_validation: bool = ...,
@@ -2785,7 +2773,6 @@ class MDF3(MDF_Common):
         samples_only: bool = ...,
         data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
         raw: bool = ...,
-        ignore_invalidation_bits: bool = ...,
         record_offset: int = ...,
         record_count: int | None = ...,
         skip_channel_validation: bool = ...,
@@ -2800,7 +2787,6 @@ class MDF3(MDF_Common):
         samples_only: bool = False,
         data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = None,
         raw: bool = False,
-        ignore_invalidation_bits: bool = False,
         record_offset: int = 0,
         record_count: int | None = None,
         skip_channel_validation: bool = False,
@@ -2842,8 +2828,6 @@ class MDF3(MDF_Common):
         raw : bool
             return channel samples without applying the conversion rule; default
             `False`
-        ignore_invalidation_bits : bool
-            only defined to have the same API with the MDF v4
         record_offset : int
             if *data=None* use this to select the record offset from which the
             group data should be loaded
@@ -3894,7 +3878,6 @@ class MDF3(MDF_Common):
                         index=channel_index,
                         data=fragment,
                         raw=True,
-                        ignore_invalidation_bits=True,
                         samples_only=False,
                     )
                     for channel_index in channels
@@ -3909,7 +3892,6 @@ class MDF3(MDF_Common):
                             index=channel_index,
                             data=fragment,
                             raw=True,
-                            ignore_invalidation_bits=True,
                             samples_only=True,
                         )
                     )
@@ -3923,7 +3905,6 @@ class MDF3(MDF_Common):
                                 group=index,
                                 index=channel_index,
                                 samples_only=True,
-                                ignore_invalidation_bits=True,
                             )[0]
                             sig.samples = sig.samples.astype(strsig.dtype)
                             del strsig

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import bisect
 from collections import defaultdict, deque
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
@@ -58,7 +58,7 @@ from numpy import (
 )
 from numpy.typing import NDArray
 from pandas import DataFrame
-from typing_extensions import Literal, TypedDict
+from typing_extensions import Literal
 
 from .. import tool
 from ..signal import InvalidationArray, Signal
@@ -66,7 +66,6 @@ from ..types import (
     BusType,
     ChannelsType,
     CompressionType,
-    DbcFileType,
     RasterType,
     ReadableBufferType,
     StrPathType,
@@ -82,7 +81,7 @@ from .cutils import (
     get_vlsd_max_sample_size,
     sort_data_block,
 )
-from .mdf_common import debug_channel, Group, MDF_Common
+from .mdf_common import BusInfo, debug_channel, Group, MDF_Common
 from .options import get_global_option
 from .source_utils import Source
 from .utils import (
@@ -175,29 +174,6 @@ logger = logging.getLogger("asammdf")
 __all__ = ["MDF4"]
 
 Version = Literal["4.00", "4.10", "4.11", "4.20"]
-
-
-class CanBusInfo(TypedDict):
-    dbc_files: Iterable[DbcFileType]
-    total_unique_ids: set[tuple[int, bool]]
-    unknown_id_count: int
-    not_found_ids: defaultdict[StrPathType, list[tuple[tuple[int, bool] | int, str]]]
-    found_ids: defaultdict[StrPathType, set[tuple[tuple[int, int, bool], str]]]
-    unknown_ids: set[int | tuple[int, bool]]
-
-
-class LinBusInfo(TypedDict):
-    dbc_files: Iterable[DbcFileType]
-    total_unique_ids: set[tuple[int, ...]]
-    unknown_id_count: int
-    not_found_ids: defaultdict[StrPathType, list[tuple[int, str]]]
-    found_ids: defaultdict[StrPathType, set[tuple[int, str]]]
-    unknown_ids: set[int]
-
-
-class BusInfo(TypedDict, total=False):
-    CAN: CanBusInfo
-    LIN: LinBusInfo
 
 
 class MDF4(MDF_Common):
@@ -1395,7 +1371,7 @@ class MDF4(MDF_Common):
 
     def _load_data(
         self,
-        group: Group,
+        group: Group[DataGroup, ChannelGroup, Channel],
         record_offset: int = 0,
         record_count: int | None = None,
         optimize_read: bool = False,
@@ -1737,7 +1713,7 @@ class MDF4(MDF_Common):
                 else:
                     yield b"", 0, 0, None
 
-    def _prepare_record(self, group: Group) -> list:
+    def _prepare_record(self, group: Group[DataGroup, ChannelGroup, Channel]) -> list:
         """compute record
 
         Parameters
@@ -9210,7 +9186,7 @@ class MDF4(MDF_Common):
         dst: WritableBufferType | StrPathType,
         overwrite: bool = False,
         compression: CompressionType = 0,
-        progress=None,
+        progress: Callable[[int, int], None] | Any | None = None,
         add_history_block: bool = True,
     ) -> Path | object:
         """Save MDF to *dst*. If overwrite is *True* then the destination file
