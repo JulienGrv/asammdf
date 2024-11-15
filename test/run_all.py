@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 import unittest
 
-import xmlrunner
+import xmlrunner  # type: ignore[import-not-found]
 
 
 def main():

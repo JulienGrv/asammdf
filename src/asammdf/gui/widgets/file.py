@@ -187,9 +187,16 @@ class FileWidget(WithMDIArea, Ui_file_widget, QtWidgets.QWidget):
                         progress.setLabelText(f"Converting from {extension} to mdf")
 
                     try:
-                        from mfile import ASC, BLF, BSIG, DL3, ERG, TDMS
+                        from mfile import (  # type: ignore[import-not-found]
+                            ASC,
+                            BLF,
+                            BSIG,
+                            DL3,
+                            ERG,
+                            TDMS,
+                        )
                     except ImportError:
-                        from cmerg import BSIG, ERG
+                        from cmerg import BSIG, ERG  # type: ignore[import-untyped]
 
                     if file_name.suffix.lower() == ".erg":
                         cls = ERG
@@ -356,7 +363,7 @@ class FileWidget(WithMDIArea, Ui_file_widget, QtWidgets.QWidget):
             formats = ["MDF", "ASC", "CSV"]
 
             try:
-                from hdf5storage import savemat
+                from hdf5storage import savemat  # type: ignore[import-untyped]
 
                 formats.append("MAT")
             except ImportError:
@@ -368,7 +375,9 @@ class FileWidget(WithMDIArea, Ui_file_widget, QtWidgets.QWidget):
                     pass
 
             try:
-                from h5py import File as HDF5  # noqa: F401
+                from h5py import (  # type: ignore[import-untyped]
+                    File as HDF5,  # noqa: F401
+                )
 
                 formats.append("HDF5")
             except ImportError:

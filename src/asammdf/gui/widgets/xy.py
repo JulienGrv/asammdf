@@ -1,7 +1,7 @@
 from functools import partial
 
 import numpy as np
-import pyqtgraph as pg
+import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...signal import Signal

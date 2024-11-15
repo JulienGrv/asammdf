@@ -326,121 +326,121 @@ def inverse_conversion(conversion: ChannelConversionType | dict | None) -> v4b.C
     return conv
 
 
-def from_dict(conversion: dict[str, Any]) -> v4b.ChannelConversion:
-    conversion = dict(conversion)
+def from_dict(conversion_dict: dict[str, Any]) -> v4b.ChannelConversion | None:
+    conversion_dict = dict(conversion_dict)
 
-    if not conversion:
+    if not conversion_dict:
         conversion = None
 
-    elif "a" in conversion:
-        conversion["conversion_type"] = v4c.CONVERSION_TYPE_LIN
-        conversion = v4b.ChannelConversion(**conversion)
+    elif "a" in conversion_dict:
+        conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_LIN
+        conversion = v4b.ChannelConversion(**conversion_dict)
 
-    elif "formula" in conversion:
-        conversion["formula"] = conversion["formula"]
-        conversion["conversion_type"] = v4c.CONVERSION_TYPE_ALG
-        conversion = v4b.ChannelConversion(**conversion)
+    elif "formula" in conversion_dict:
+        conversion_dict["formula"] = conversion_dict["formula"]
+        conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_ALG
+        conversion = v4b.ChannelConversion(**conversion_dict)
 
-    elif all(key in conversion for key in [f"P{i}" for i in range(1, 7)]):
-        conversion["conversion_type"] = v4c.CONVERSION_TYPE_RAT
-        conversion = v4b.ChannelConversion(**conversion)
+    elif all(key in conversion_dict for key in [f"P{i}" for i in range(1, 7)]):
+        conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_RAT
+        conversion = v4b.ChannelConversion(**conversion_dict)
 
-    elif "raw_0" in conversion and "phys_0" in conversion:
-        conversion["conversion_type"] = v4c.CONVERSION_TYPE_TAB
+    elif "raw_0" in conversion_dict and "phys_0" in conversion_dict:
+        conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_TAB
         nr = 0
-        while f"phys_{nr}" in conversion:
+        while f"phys_{nr}" in conversion_dict:
             nr += 1
-        conversion["val_param_nr"] = nr * 2
-        if conversion.get("interpolation", False):
-            conversion["conversion_type"] = v4c.CONVERSION_TYPE_TABI
+        conversion_dict["val_param_nr"] = nr * 2
+        if conversion_dict.get("interpolation", False):
+            conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_TABI
         else:
-            conversion["conversion_type"] = v4c.CONVERSION_TYPE_TAB
-        conversion = v4b.ChannelConversion(**conversion)
+            conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_TAB
+        conversion = v4b.ChannelConversion(**conversion_dict)
 
-    elif "mask_0" in conversion and "text_0" in conversion:
-        conversion["conversion_type"] = v4c.CONVERSION_TYPE_BITFIELD
+    elif "mask_0" in conversion_dict and "text_0" in conversion_dict:
+        conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_BITFIELD
         nr = 0
-        while f"text_{nr}" in conversion:
-            val = conversion[f"text_{nr}"]
+        while f"text_{nr}" in conversion_dict:
+            val = conversion_dict[f"text_{nr}"]
             if isinstance(val, (bytes, str)):
                 partial_conversion = {
                     "conversion_type": v4c.CONVERSION_TYPE_RTABX,
-                    f"upper_{nr}": conversion[f"upper_{nr}"],
-                    f"lower_{nr}": conversion[f"lower_{nr}"],
+                    f"upper_{nr}": conversion_dict[f"upper_{nr}"],
+                    f"lower_{nr}": conversion_dict[f"lower_{nr}"],
                     f"text_{nr}": (
-                        conversion[f"text_{nr}"]
-                        if isinstance(conversion[f"text_{nr}"], bytes)
-                        else conversion[f"text_{nr}"].encode("utf-8")
+                        conversion_dict[f"text_{nr}"]
+                        if isinstance(conversion_dict[f"text_{nr}"], bytes)
+                        else conversion_dict[f"text_{nr}"].encode("utf-8")
                     ),
                     "default": b"",
                 }
-                conversion[f"text_{nr}"] = from_dict(partial_conversion)
+                conversion_dict[f"text_{nr}"] = from_dict(partial_conversion)
             elif isinstance(val, dict):
-                conversion[f"text_{nr}"] = from_dict(val)
+                conversion_dict[f"text_{nr}"] = from_dict(val)
 
             nr += 1
 
-        conversion["ref_param_nr"] = nr
-        conversion["val_param_nr"] = nr
-        conversion = v4b.ChannelConversion(**conversion)
+        conversion_dict["ref_param_nr"] = nr
+        conversion_dict["val_param_nr"] = nr
+        conversion = v4b.ChannelConversion(**conversion_dict)
 
-    elif "upper_0" in conversion and "phys_0" in conversion:
-        conversion["conversion_type"] = v4c.CONVERSION_TYPE_RTAB
+    elif "upper_0" in conversion_dict and "phys_0" in conversion_dict:
+        conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_RTAB
         nr = 0
-        while f"phys_{nr}" in conversion:
+        while f"phys_{nr}" in conversion_dict:
             nr += 1
-        conversion["val_param_nr"] = nr * 3 + 1
-        conversion = v4b.ChannelConversion(**conversion)
+        conversion_dict["val_param_nr"] = nr * 3 + 1
+        conversion = v4b.ChannelConversion(**conversion_dict)
 
-    elif "val_0" in conversion and "text_0" in conversion:
-        conversion["conversion_type"] = v4c.CONVERSION_TYPE_TABX
+    elif "val_0" in conversion_dict and "text_0" in conversion_dict:
+        conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_TABX
         nr = 0
-        while f"text_{nr}" in conversion:
-            val = conversion[f"text_{nr}"]
+        while f"text_{nr}" in conversion_dict:
+            val = conversion_dict[f"text_{nr}"]
             if isinstance(val, str):
-                conversion[f"text_{nr}"] = val.encode("utf-8")
+                conversion_dict[f"text_{nr}"] = val.encode("utf-8")
             elif isinstance(val, dict):
-                conversion[f"text_{nr}"] = from_dict(val)
+                conversion_dict[f"text_{nr}"] = from_dict(val)
             nr += 1
 
-        val = conversion.get("default_addr", b"")
+        val = conversion_dict.get("default_addr", b"")
         if isinstance(val, str):
-            conversion["default_addr"] = val.encode("utf-8")
+            conversion_dict["default_addr"] = val.encode("utf-8")
         elif isinstance(val, dict):
-            conversion["default_addr"] = from_dict(val)
+            conversion_dict["default_addr"] = from_dict(val)
 
-        conversion["ref_param_nr"] = nr + 1
-        conversion = v4b.ChannelConversion(**conversion)
+        conversion_dict["ref_param_nr"] = nr + 1
+        conversion = v4b.ChannelConversion(**conversion_dict)
 
-    elif "upper_0" in conversion and "text_0" in conversion:
-        conversion["conversion_type"] = v4c.CONVERSION_TYPE_RTABX
+    elif "upper_0" in conversion_dict and "text_0" in conversion_dict:
+        conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_RTABX
         nr = 0
-        while f"text_{nr}" in conversion:
-            val = conversion[f"text_{nr}"]
+        while f"text_{nr}" in conversion_dict:
+            val = conversion_dict[f"text_{nr}"]
             if isinstance(val, str):
-                conversion[f"text_{nr}"] = val.encode("utf-8")
+                conversion_dict[f"text_{nr}"] = val.encode("utf-8")
             elif isinstance(val, dict):
-                conversion[f"text_{nr}"] = from_dict(val)
+                conversion_dict[f"text_{nr}"] = from_dict(val)
             nr += 1
 
-        conversion["ref_param_nr"] = nr + 1
+        conversion_dict["ref_param_nr"] = nr + 1
 
-        val = conversion.get("default_addr", b"")
+        val = conversion_dict.get("default_addr", b"")
         if isinstance(val, str):
-            conversion["default_addr"] = val.encode("utf-8")
+            conversion_dict["default_addr"] = val.encode("utf-8")
         elif isinstance(val, dict):
-            conversion["default_addr"] = from_dict(val)
-        conversion = v4b.ChannelConversion(**conversion)
+            conversion_dict["default_addr"] = from_dict(val)
+        conversion = v4b.ChannelConversion(**conversion_dict)
 
-    elif "default_addr" in conversion:
-        conversion["conversion_type"] = v4c.CONVERSION_TYPE_TABX
-        val = conversion["default_addr"]
+    elif "default_addr" in conversion_dict:
+        conversion_dict["conversion_type"] = v4c.CONVERSION_TYPE_TABX
+        val = conversion_dict["default_addr"]
         if isinstance(val, str):
-            conversion["default_addr"] = val.encode("utf-8")
+            conversion_dict["default_addr"] = val.encode("utf-8")
         elif isinstance(val, dict):
-            conversion["default_addr"] = from_dict(val)
-        conversion["ref_param_nr"] = 1
-        conversion = v4b.ChannelConversion(**conversion)
+            conversion_dict["default_addr"] = from_dict(val)
+        conversion_dict["ref_param_nr"] = 1
+        conversion = v4b.ChannelConversion(**conversion_dict)
 
     else:
         conversion = v4b.ChannelConversion(conversion_type=v4c.CONVERSION_TYPE_NON)

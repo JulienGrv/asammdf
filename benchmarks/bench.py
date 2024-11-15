@@ -1,3 +1,4 @@
+# ruff: noqa
 """
 benchmark asammdf vs mdfreader
 """
@@ -10,7 +11,7 @@ import platform
 import sys
 import traceback
 
-from mdfreader import __version__ as mdfreader_version
+from mdfreader import __version__ as mdfreader_version  # type: ignore[import-untyped]
 from mdfreader import Mdf as MDFreader
 import numpy as np
 import psutil
@@ -32,7 +33,7 @@ PYVERSION = sys.version_info[0]
 if PYVERSION > 2:
     from time import perf_counter
 else:
-    from time import clock as perf_counter
+    from time import clock as perf_counter  # type: ignore[attr-defined, no-redef]
 
 
 class MyList(list):

@@ -1004,7 +1004,13 @@ class MDF:
             )
         raise MdfException("get_bus_signal is only supported for MDF4 files")
 
-    def convert(self, version: Version, progress=None) -> MDF | object:
+    @overload
+    def convert(self, version: Version, progress: None = ...) -> MDF: ...
+
+    @overload
+    def convert(self, version: Version, progress: Callable[[int, int], None] | Any = ...) -> MDF | object: ...
+
+    def convert(self, version: Version, progress: Callable[[int, int], None] | Any | None = None) -> MDF | object:
         """convert *MDF* to other version
 
         Parameters
@@ -1083,6 +1089,30 @@ class MDF:
 
         return out
 
+    @overload
+    def cut(
+        self,
+        start: float | None = ...,
+        stop: float | None = ...,
+        whence: int = ...,
+        version: Version | None = ...,
+        include_ends: bool = ...,
+        time_from_zero: bool = ...,
+        progress: None = ...,
+    ) -> MDF: ...
+
+    @overload
+    def cut(
+        self,
+        start: float | None = ...,
+        stop: float | None = ...,
+        whence: int = ...,
+        version: Version | None = ...,
+        include_ends: bool = ...,
+        time_from_zero: bool = ...,
+        progress: Callable[[int, int], None] | Any = ...,
+    ) -> MDF | object: ...
+
     def cut(
         self,
         start: float | None = None,
@@ -1091,7 +1121,7 @@ class MDF:
         version: Version | None = None,
         include_ends: bool = True,
         time_from_zero: bool = False,
-        progress=None,
+        progress: Callable[[int, int], None] | Any | None = None,
     ) -> MDF | object:
         """cut *MDF* file. *start* and *stop* limits are absolute values
         or values relative to the first timestamp depending on the *whence*

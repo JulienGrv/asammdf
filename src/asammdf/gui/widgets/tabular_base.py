@@ -30,10 +30,11 @@ import bisect
 import datetime
 import logging
 from traceback import format_exc
+from typing import Optional
 
 import numpy as np
 import pandas as pd
-import pyqtgraph.functions as fn
+import pyqtgraph.functions as fn  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui, QtWidgets
 
 import asammdf.mdf as mdf_module
@@ -851,11 +852,12 @@ class HeaderView(QtWidgets.QTableView):
 
         # This is used for resizing the left header width or the top header height
         # Returns a boolean indicating whether the mouse is over the header edge to allow resizing
-        def over_header_edge(mouse_position: QtCore.QPoint(), margin=7) -> bool:
+        def over_header_edge(mouse_position: QtCore.QPoint, margin=7) -> Optional[bool]:
             if self.orientation == Qt.Orientation.Horizontal:
                 return abs(mouse_position - self.height()) < margin
             elif self.orientation == Qt.Orientation.Vertical:
                 return abs(mouse_position - self.width()) < margin
+            return None
 
         # mouse_position is the position along the axis of the header. X pos for top header, Y pos for side header
         if self.orientation == Qt.Orientation.Horizontal:

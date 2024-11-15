@@ -2,7 +2,7 @@ from functools import partial
 
 from natsort import natsorted
 import numpy as np
-from pyqtgraph import functions as fn
+from pyqtgraph import functions as fn  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..ui.signal_scale import Ui_ScaleDialog

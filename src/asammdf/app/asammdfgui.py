@@ -23,7 +23,7 @@ def main(measurements=None):
         os.environ["PYTHONPATH"] = alternative_sitepacakges
         sys.path.insert(0, alternative_sitepacakges)
 
-    import pyqtgraph
+    import pyqtgraph  # type: ignore[import-untyped]
     from PySide6 import QtWidgets
 
     from asammdf.gui.utils import excepthook, set_app_user_model_id

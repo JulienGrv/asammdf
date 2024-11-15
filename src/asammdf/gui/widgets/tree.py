@@ -7,7 +7,7 @@ import re
 from traceback import format_exc
 
 import numpy as np
-from pyqtgraph import functions as fn
+from pyqtgraph import functions as fn  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...blocks.conversion_utils import from_dict, to_dict

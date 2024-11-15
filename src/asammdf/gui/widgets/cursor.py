@@ -1,4 +1,4 @@
-import pyqtgraph as pg
+import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui
 
 from ... import tool as Tool

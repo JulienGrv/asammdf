@@ -8,17 +8,18 @@ import urllib
 import urllib.request
 from zipfile import ZipFile
 
-import numexpr
+import numexpr  # type: ignore[import-untyped]
 import numpy as np
 from pandas import DataFrame
 
-from asammdf import MDF, Signal, SUPPORTED_VERSIONS
+import asammdf
+from asammdf import MDF, Signal
 from asammdf.blocks.utils import MdfException
 from asammdf.mdf import SearchMode
 
 from .utils import cycles, generate_arrays_test_file, generate_test_file
 
-SUPPORTED_VERSIONS = [version for version in SUPPORTED_VERSIONS if "4.20" > version >= "3.20"]
+SUPPORTED_VERSIONS = [version for version in asammdf.SUPPORTED_VERSIONS if "4.20" > version >= "3.20"]
 
 CHANNEL_LEN = 100000
 

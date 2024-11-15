@@ -1191,55 +1191,55 @@ class Signal:
             virtual_master_conversion=self.virtual_master_conversion,
         )
 
-    def __sub__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __sub__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__sub__")
 
-    def __isub__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __isub__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__sub__(other)
 
-    def __rsub__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __rsub__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return -self.__sub__(other)
 
-    def __add__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __add__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__add__")
 
-    def __iadd__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __iadd__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__add__(other)
 
-    def __radd__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __radd__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__add__(other)
 
-    def __truediv__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __truediv__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__truediv__")
 
-    def __itruediv__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __itruediv__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__truediv__(other)
 
-    def __rtruediv__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __rtruediv__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__rtruediv__")
 
-    def __mul__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __mul__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__mul__")
 
-    def __imul__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __imul__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__mul__(other)
 
-    def __rmul__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __rmul__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__mul__(other)
 
-    def __floordiv__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __floordiv__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__floordiv__")
 
-    def __ifloordiv__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __ifloordiv__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__truediv__(other)
 
-    def __rfloordiv__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __rfloordiv__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return 1 / self.__apply_func(other, "__rfloordiv__")
 
-    def __mod__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __mod__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__mod__")
 
-    def __pow__(self, other: Signal | NDArray[Any] | None) -> Signal:
+    def __pow__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__pow__")
 
     def __and__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
@@ -1278,22 +1278,22 @@ class Signal:
     def __rshift__(self, other: Signal | NDArray[Any] | int | None) -> Signal:
         return self.__apply_func(other, "__rshift__")
 
-    def __lt__(self, other: Signal | NDArray[Any] | None) -> bool:
+    def __lt__(self, other: Signal | NDArray[Any] | None) -> Signal:
         return self.__apply_func(other, "__lt__")
 
-    def __le__(self, other: Signal | NDArray[Any] | None) -> bool:
+    def __le__(self, other: Signal | NDArray[Any] | None) -> Signal:
         return self.__apply_func(other, "__le__")
 
-    def __gt__(self, other: Signal | NDArray[Any] | None) -> bool:
+    def __gt__(self, other: Signal | NDArray[Any] | None) -> Signal:
         return self.__apply_func(other, "__gt__")
 
-    def __ge__(self, other: Signal | NDArray[Any] | None) -> bool:
+    def __ge__(self, other: Signal | NDArray[Any] | None) -> Signal:
         return self.__apply_func(other, "__ge__")
 
-    def __eq__(self, other: Signal | NDArray[Any] | None) -> bool:
+    def __eq__(self, other: Signal | NDArray[Any] | None) -> Signal:
         return self.__apply_func(other, "__eq__")
 
-    def __ne__(self, other: Signal | NDArray[Any] | None) -> bool:
+    def __ne__(self, other: Signal | NDArray[Any] | None) -> Signal:
         return self.__apply_func(other, "__ne__")
 
     def __iter__(self) -> Iterator[Any]:

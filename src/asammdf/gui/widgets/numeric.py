@@ -10,7 +10,7 @@ from traceback import format_exc
 from natsort import natsorted
 import numpy as np
 from numpy import searchsorted
-import pyqtgraph.functions as fn
+import pyqtgraph.functions as fn  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from asammdf.gui import utils

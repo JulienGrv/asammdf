@@ -20,7 +20,7 @@ import time
 import unittest
 from unittest import mock
 
-import pyqtgraph
+import pyqtgraph  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
 from asammdf import mdf
@@ -55,7 +55,7 @@ class TestBase(unittest.TestCase):
     test_workspace = os.path.join(os.path.dirname(__file__), "test_workspace")
     screenshots = os.path.join(os.path.dirname(__file__).split("test")[0], "screenshots")
 
-    patchers = []
+    patchers: list[mock._patcher] = []
     # MockClass ErrorDialog
     mc_ErrorDialog = None
 
@@ -102,7 +102,7 @@ class TestBase(unittest.TestCase):
             os.makedirs(self.screenshots)
 
         os.makedirs(self.test_workspace)
-        self.mc_ErrorDialog.reset_mock()
+        self.mc_ErrorDialog.reset_mock()  # type: ignore[attr-defined]
         self.processEvents()
 
     @classmethod

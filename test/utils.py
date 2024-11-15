@@ -2,13 +2,11 @@ from pathlib import Path
 
 import numpy as np
 
-from asammdf import MDF, Signal, SUPPORTED_VERSIONS
+from asammdf import MDF, Signal
 import asammdf.blocks.v2_v3_blocks as v3b
 import asammdf.blocks.v2_v3_constants as v3c
 import asammdf.blocks.v4_blocks as v4b
 import asammdf.blocks.v4_constants as v4c
-
-SUPPORTED_VERSIONS = SUPPORTED_VERSIONS[1:]
 
 cycles = 500
 channels_count = 20

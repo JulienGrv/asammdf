@@ -6,7 +6,7 @@ from PySide6 import QtCore, QtWidgets
 from ..ui.gps import Ui_GPSDisplay
 
 try:
-    from pyqtlet2 import L, MapWidget
+    from pyqtlet2 import L, MapWidget  # type: ignore[import-untyped]
     from PySide6.QtWebEngineCore import QWebEngineSettings
 
 except:

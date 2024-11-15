@@ -92,7 +92,7 @@ archs = ["auto64"]                        # only build for 64bit architectures
 skip = ["pp*", "*_ppc64le", "*-musllinux*", "*_s390x"]
 
 [tool.mypy]
-files = "src/asammdf"
+files = "."
 exclude = ["doc/_build/", "src/asammdf/gui/"]
 python_version = "3.9"
 plugins = ["numpy.typing.mypy_plugin"]

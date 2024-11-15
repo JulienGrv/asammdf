@@ -1,4 +1,7 @@
+from typing import Any
+
 import numpy as np
+from numpy.typing import DTypeLike
 
 from asammdf import MDF, Signal
 
@@ -19,6 +22,8 @@ sig = Signal(
     comment="Unsigned 64 bit channel {}",
 )
 sigs.append(sig)
+
+conversion: dict[str, Any]
 
 # linear
 conversion = {"a": 2, "b": -0.5}
@@ -58,9 +63,9 @@ sig = Signal(
 sigs.append(sig)
 
 # string channel
-sig = [f"String channel sample {j}".encode("ascii") for j in range(cycles)]
+strings = [f"String channel sample {j}".encode("ascii") for j in range(cycles)]
 sig = Signal(
-    np.array(sig),
+    np.array(strings),
     t,
     name="Channel_string",
     comment="String channel",
@@ -135,6 +140,7 @@ sigs.append(sig)
 
 mdf.append(sigs, comment="single dimensional channels", common_timebase=True)
 
+types: list[tuple[str, DTypeLike]]
 
 sigs = []
 
@@ -207,7 +213,7 @@ sigs.append(sig)
 
 
 # nested structures
-l4_arr = [
+l4_arrays = [
     np.ones(cycles, dtype=np.float64) * 41,
     np.ones(cycles, dtype=np.float64) * 42,
     np.ones(cycles, dtype=np.float64) * 43,
@@ -221,9 +227,9 @@ types = [
     ("level44", np.float64),
 ]
 
-l4_arr = np.rec.fromarrays(l4_arr, dtype=types)
+l4_arr = np.rec.fromarrays(l4_arrays, dtype=types)
 
-l3_arr = [
+l3_arrays = [
     l4_arr,
     l4_arr,
     l4_arr,
@@ -235,24 +241,24 @@ types = [
     ("level33", l4_arr.dtype),
 ]
 
-l3_arr = np.rec.fromarrays(l3_arr, dtype=types)
+l3_arr = np.rec.fromarrays(l3_arrays, dtype=types)
 
 
-l2_arr = [
+l2_arrays = [
     l3_arr,
     l3_arr,
 ]
 
 types = [("level21", l3_arr.dtype), ("level22", l3_arr.dtype)]
 
-l2_arr = np.rec.fromarrays(l2_arr, dtype=types)
+l2_arr = np.rec.fromarrays(l2_arrays, dtype=types)
 
 
-l1_arr = [l2_arr]
+l1_arrays = [l2_arr]
 
 types = [("level11", l2_arr.dtype)]
 
-l1_arr = np.rec.fromarrays(l1_arr, dtype=types)
+l1_arr = np.rec.fromarrays(l1_arrays, dtype=types)
 
 
 sigs.append(Signal(l1_arr, t, name="Nested_structures"))
