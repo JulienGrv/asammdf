@@ -376,6 +376,12 @@ class MDF:
         return self._mdf.events
 
     @property
+    def file_history(self) -> list[v4_blocks.FileHistory]:
+        if not isinstance(self._mdf, mdf_v4.MDF4):
+            raise MdfException("the attribute 'file_history' is only available for MDF4")
+        return self._mdf.file_history
+
+    @property
     def groups(self) -> list[Group]:
         return self._mdf.groups
 
@@ -411,11 +417,12 @@ class MDF:
         if item == "_mdf":
             super().__setattr__(item, value)
         else:
-            warnings.warn(
-                "accessing an attribute from the underlying '_mdf' object might be deprecated in the future in favor of a public method on the MDF class. If no public method is available yet, please open a pull request to add it.",
-                category=PendingDeprecationWarning,
-                stacklevel=2,
-            )
+            if hasattr(self._mdf, item):
+                warnings.warn(
+                    "accessing an attribute from the underlying '_mdf' object might be deprecated in the future in favor of a public method on the MDF class. If no public method is available yet, please open a pull request to add it.",
+                    category=PendingDeprecationWarning,
+                    stacklevel=2,
+                )
             setattr(self._mdf, item, value)
 
     def __getattr__(self, item: str) -> Any:
@@ -438,7 +445,7 @@ class MDF:
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
         traceback: TracebackType | None,
-    ) -> bool | None:
+    ) -> None:
         try:
             self._mdf.close()
         except:
@@ -651,7 +658,7 @@ class MDF:
 
     @staticmethod
     def _transfer_channel_group_data(sgroup: ChannelGroupType, ogroup: ChannelGroupType) -> None:
-        if not hasattr(sgroup, "acq_name") or not hasattr(ogroup, "acq_name"):
+        if not (isinstance(sgroup, v4_blocks.ChannelGroup) and isinstance(ogroup, v4_blocks.ChannelGroup)):
             sgroup.comment = ogroup.comment
         else:
             sgroup.flags = ogroup.flags
@@ -807,6 +814,22 @@ class MDF:
 
         if raise_on_multiple_occurrences is not None:
             self._mdf._raise_on_multiple_occurrences = bool(raise_on_multiple_occurrences)
+
+    def load_data(
+        self,
+        group_nr: int,
+        record_offset: int = 0,
+        record_count: int | None = None,
+        optimize_read: bool = False,
+    ) -> Iterator[tuple[bytes, int, int, bytes | None]] | Iterator[tuple[bytes, int, int | None]]:
+        if isinstance(self._mdf, mdf_v4.MDF4):
+            return self._mdf._load_data(
+                self._mdf.groups[group_nr],
+                record_offset=record_offset,
+                record_count=record_count,
+                optimize_read=optimize_read,
+            )
+        return self._mdf._load_data(self._mdf.groups[group_nr], record_offset=record_offset, record_count=record_count)
 
     @overload
     def append(
@@ -1574,7 +1597,7 @@ class MDF:
 
         if compression == "SNAPPY":
             try:
-                import snappy  # noqa: F401
+                import snappy  # type: ignore[import-untyped] # noqa: F401
             except ImportError:
                 logger.warning("snappy compressor is not installed; compression will be set to GZIP")
                 compression = "GZIP"
@@ -1592,7 +1615,7 @@ class MDF:
 
         elif fmt == "hdf5":
             try:
-                from h5py import File as HDF5
+                from h5py import File as HDF5  # type: ignore[import-untyped]
             except ImportError:
                 logger.warning("h5py not found; export to HDF5 is unavailable")
                 return None
@@ -1600,7 +1623,7 @@ class MDF:
         elif fmt == "mat":
             if format == "7.3":
                 try:
-                    from hdf5storage import savemat
+                    from hdf5storage import savemat  # type: ignore[import-untyped]
                 except ImportError:
                     logger.warning("hdf5storage not found; export to mat v7.3 is unavailable")
                     return None
@@ -2509,7 +2532,7 @@ class MDF:
         raster: float | None = None,
         samples_only: bool = False,
         raw: bool = False,
-    ) -> Iterator[Signal] | Iterator[tuple[NDArray[Any], NDArray[Any] | None]]:
+    ) -> Iterator[Signal | tuple[NDArray[Any], NDArray[Any] | None]]:
         """iterator over a channel
 
         This is usefull in case of large files with a small number of channels.
@@ -2538,12 +2561,10 @@ class MDF:
 
         gp_nr, ch_nr = self._mdf._validate_channel_selection(name, group, index)
 
-        grp = self._mdf.groups[gp_nr]
-
-        data = self._mdf._load_data(grp)
+        data = self.load_data(gp_nr)
 
         for fragment in data:
-            yield self._mdf.get(
+            yield self.get(
                 group=gp_nr,
                 index=ch_nr,
                 raster=raster,
@@ -4470,15 +4491,15 @@ class MDF:
 
             if raster is not None:
                 try:
-                    raster = float(raster)
-                    assert raster > 0
+                    raster_float = float(raster)
+                    assert raster_float > 0
                 except (TypeError, ValueError):
                     if isinstance(raster, str):
-                        master = self._mdf.get(raster, raw=True, ignore_invalidation_bits=True).timestamps
+                        master = self.get(raster, raw=True, ignore_invalidation_bits=True).timestamps
                     else:
                         master = np.array(raster)
                 else:
-                    master = master_using_raster(self._mdf, raster)
+                    master = master_using_raster(self._mdf, raster_float)
             else:
                 if masters:
                     master = reduce(np.union1d, masters.values())
@@ -5317,6 +5338,9 @@ class MDF:
         prefix: str = "",
         progress=None,
     ) -> list[tuple[None, int, int]] | object | None:
+        if not isinstance(self._mdf, mdf_v4.MDF4):
+            raise MdfException("the method '_extract_lin_logging' is only available for MDF4")
+
         out = output_file
 
         max_flags: list[list[list[bool | np.bool_]]] = []
@@ -5342,8 +5366,11 @@ class MDF:
         count = sum(
             1
             for group in self._mdf.groups
-            if group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
-            and group.channel_group.acq_source.bus_type == v4c.BUS_TYPE_CAN
+            if (
+                group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
+                and group.channel_group.acq_source
+                and group.channel_group.acq_source.bus_type == v4c.BUS_TYPE_CAN
+            )
         )
         count *= len(valid_dbc_files)
 
@@ -5406,7 +5433,7 @@ class MDF:
             for i, group in enumerate(self._mdf.groups):
                 if (
                     not group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
-                    or group.channel_group.acq_source.bus_type != v4c.BUS_TYPE_CAN
+                    or (group.channel_group.acq_source and group.channel_group.acq_source.bus_type != v4c.BUS_TYPE_CAN)
                     or not "CAN_DataFrame" in [ch.name for ch in group.channels]
                 ):
                     continue
@@ -5426,7 +5453,7 @@ class MDF:
 
                     msg_ids = self._mdf.get("CAN_DataFrame.ID", group=i, data=fragment).astype("<u4")
                     try:
-                        msg_ide = self._mdf.get("CAN_DataFrame.IDE", group=i, data=fragment).samples.astype("<u1")
+                        msg_ide = self._mdf.get("CAN_DataFrame.IDE", group=i, data=fragment).astype("<u1")
                     except:
                         msg_ide = (msg_ids & 0x80000000) >> 31
 
@@ -5457,7 +5484,7 @@ class MDF:
                         j1939_msg_pgns = np.where(pf >= 240, _pgn + ps, _pgn)
                         j9193_msg_sa = bus_msg_ids & 0xFF
 
-                        unique_ids: set[tuple[int, bool]] = set(zip(bus_msg_ids.tolist(), bus_msg_ide.tolist()))
+                        unique_ids: set[tuple[int, bool]] = set(zip(bus_msg_ids.tolist(), bus_msg_ide.samples.tolist()))
 
                         total_unique_ids = total_unique_ids | set(unique_ids)
 
@@ -5507,7 +5534,9 @@ class MDF:
                                     (j1939_msg_pgns == pgn_number) & (j9193_msg_sa == source_address)
                                 ).ravel()
                             else:
-                                idx = np.argwhere((bus_msg_ids == msg_id) & (bus_msg_ide == is_extended)).ravel()
+                                idx = np.argwhere(
+                                    (bus_msg_ids == msg_id) & (bus_msg_ide.samples == is_extended)
+                                ).ravel()
 
                             payload = bus_data_bytes[idx]
                             t = bus_t[idx]
@@ -5686,6 +5715,9 @@ class MDF:
         prefix: str = "",
         progress=None,
     ) -> object | None:
+        if not isinstance(self._mdf, mdf_v4.MDF4):
+            raise MdfException("the method '_extract_lin_logging' is only available for MDF4")
+
         out = output_file
 
         valid_dbc_files: list[tuple[CanMatrix, StrPathType, int]] = []
@@ -5709,8 +5741,11 @@ class MDF:
         count = sum(
             1
             for group in self._mdf.groups
-            if group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
-            and group.channel_group.acq_source.bus_type == v4c.BUS_TYPE_LIN
+            if (
+                group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
+                and group.channel_group.acq_source
+                and group.channel_group.acq_source.bus_type == v4c.BUS_TYPE_LIN
+            )
         )
         count *= len(valid_dbc_files)
 
@@ -5739,16 +5774,9 @@ class MDF:
             msg_map = {}
 
             for i, group in enumerate(self._mdf.groups):
-                group = typing.cast(
-                    Union[
-                        Group[v2_v3_blocks.DataGroup, v2_v3_blocks.ChannelGroup, v2_v3_blocks.Channel],
-                        Group[v4_blocks.DataGroup, v4_blocks.ChannelGroup, v4_blocks.Channel],
-                    ],
-                    group,
-                )
                 if (
                     not group.channel_group.flags & v4c.FLAG_CG_BUS_EVENT
-                    or group.channel_group.acq_source.bus_type != v4c.BUS_TYPE_LIN
+                    or (group.channel_group.acq_source and group.channel_group.acq_source.bus_type != v4c.BUS_TYPE_LIN)
                     or not "LIN_Frame" in [ch.name for ch in group.channels]
                 ):
                     continue
@@ -6057,7 +6085,7 @@ class MDF:
                                 if sig.invalidation_bits is not None:
                                     sig.invalidation_bits = sig.invalidation_bits[indexes]
                 cg = self._mdf.groups[virtual_group].channel_group
-                cg_nr = out._mdf.append(
+                cg_nr = out.append(
                     sigs,
                     acq_name=getattr(cg, "acq_name", None),
                     acq_source=getattr(cg, "acq_source", None),

@@ -304,7 +304,6 @@ class MDF3(MDF_Common):
         group: Group[DataGroup, ChannelGroup, Channel],
         record_offset: int = 0,
         record_count: int | None = None,
-        optimize_read: bool = True,
     ) -> Iterator[tuple[bytes, int, int | None]]:
         """get group's data block bytes"""
         has_yielded = False
@@ -1004,9 +1003,9 @@ class MDF3(MDF_Common):
 
         if comment:
             try:
-                comment = ET.fromstring(comment)
-                if comment.find(".//TX"):
-                    comment = comment.find(".//TX").text
+                comment_elem = ET.fromstring(comment)
+                if comment_elem.find(".//TX") is not None:
+                    comment = comment_elem.find(".//TX").text
                 else:
                     comment = ""
             except ET.ParseError:
@@ -1027,9 +1026,9 @@ class MDF3(MDF_Common):
                 else:
                     current_comment = trigger.comment
                     try:
-                        current_comment = ET.fromstring(current_comment)
-                        if current_comment.find(".//TX"):
-                            current_comment = current_comment.find(".//TX").text
+                        comment_elem = ET.fromstring(current_comment)
+                        if comment_elem.find(".//TX") is not None:
+                            current_comment = comment_elem.find(".//TX").text
                         else:
                             current_comment = ""
                     except ET.ParseError:

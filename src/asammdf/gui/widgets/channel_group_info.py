@@ -9,13 +9,13 @@ from ..widgets.list_item import ListItem
 
 
 class ChannelGroupInfoWidget(Ui_ChannelGroupInfo, QtWidgets.QWidget):
-    def __init__(self, mdf, group, *args, **kwargs):
+    def __init__(self, mdf, group_index, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setupUi(self)
 
-        channel_group = group.channel_group
         self.mdf = mdf
-        self.group = group
+        self.group = self.mdf[group_index]
+        channel_group = self.group.channel_group
 
         self.channel_group_label.setText(channel_group.metadata())
 
@@ -23,7 +23,7 @@ class ChannelGroupInfoWidget(Ui_ChannelGroupInfo, QtWidgets.QWidget):
             self.source_label.setText(channel_group.acq_source.metadata())
 
         items = []
-        for i, ch in enumerate(group.channels):
+        for i, ch in enumerate(self.group.channels):
             item = ListItem(entry=i, name=ch.name)
             item.setText(item.name)
             items.append(item)
@@ -79,7 +79,7 @@ class ChannelGroupInfoWidget(Ui_ChannelGroupInfo, QtWidgets.QWidget):
         record_count = record_end - record_offset
 
         data = b"".join(
-            e[0] for e in self.mdf._load_data(self.group, record_offset=record_offset, record_count=record_count)
+            e[0] for e in self.mdf.load_data(group_index, record_offset=record_offset, record_count=record_count)
         )
 
         data = pd.Series(list(np.frombuffer(data, dtype=f"({self.record_size},)u1")))

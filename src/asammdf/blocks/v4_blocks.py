@@ -5035,6 +5035,22 @@ class _EventBlockBase:
     )
 
 
+class _EventBlockKwargs(BlockKwargs, total=False):
+    next_ev_addr: int
+    parent_ev_addr: int
+    range_start_ev_addr: int
+    name_addr: int
+    comment_addr: int
+    event_type: int
+    sync_type: int
+    range_type: int
+    cause: int
+    flags: int
+    sync_base: int
+    sync_factor: float
+    group_name_addr: int
+
+
 class EventBlock(_EventBlockBase):
     """
     *EventBlock* has the following attributes, that are also available as
@@ -5083,7 +5099,7 @@ class EventBlock(_EventBlockBase):
 
     """
 
-    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[_EventBlockKwargs]) -> None:
         self.name = self.comment = self.group_name = ""
         self.scopes = []
         self.parent = None

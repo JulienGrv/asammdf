@@ -4,7 +4,7 @@ from ..widgets.channel_group_info import ChannelGroupInfoWidget
 
 
 class ChannelGroupInfoDialog(QtWidgets.QDialog):
-    def __init__(self, mdf, group, index, *args, **kwargs):
+    def __init__(self, mdf, group_index, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.setWindowFlags(QtCore.Qt.WindowType.Window)
@@ -12,9 +12,9 @@ class ChannelGroupInfoDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout()
         self.setLayout(layout)
 
-        self.setWindowTitle(f"Channel group {index}")
+        self.setWindowTitle(f"Channel group {group_index}")
 
-        layout.addWidget(ChannelGroupInfoWidget(mdf, group, self))
+        layout.addWidget(ChannelGroupInfoWidget(mdf, group_index, self))
 
         self.setStyleSheet('font: 8pt "Consolas";}')
 

@@ -1587,7 +1587,7 @@ MultiRasterSeparator;&
         if index == 0xFFFFFFFFFFFFFFFF:
             group = self.mdf.groups[group_index]
 
-            msg = ChannelGroupInfoDialog(self.mdf, group, group_index, self)
+            msg = ChannelGroupInfoDialog(self.mdf, group_index, self)
             msg.show()
         else:
             channel = self.mdf.get_channel_metadata(group=group_index, index=index)

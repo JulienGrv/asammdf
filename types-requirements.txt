@@ -1,4 +1,5 @@
 pandas-stubs
+pyarrow-stubs
 scipy-stubs; python_version >= '3.10'
 types-lxml
 types-psutil
