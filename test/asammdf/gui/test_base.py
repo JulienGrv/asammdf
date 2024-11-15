@@ -55,7 +55,7 @@ class TestBase(unittest.TestCase):
     test_workspace = os.path.join(os.path.dirname(__file__), "test_workspace")
     screenshots = os.path.join(os.path.dirname(__file__).split("test")[0], "screenshots")
 
-    patchers: list[mock._patcher] = []
+    patchers: list[mock._patch] = []
     # MockClass ErrorDialog
     mc_ErrorDialog = None
 
@@ -81,7 +81,7 @@ class TestBase(unittest.TestCase):
 
         loop = QtCore.QEventLoop()
         QtCore.QTimer.singleShot(int(duration * 1000), loop.quit)
-        loop.exec_()
+        loop.exec()
 
         w.showNormal()
 

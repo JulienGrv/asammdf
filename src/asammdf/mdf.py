@@ -363,6 +363,50 @@ class MDF:
         # MDF(filename).convert('4.10')
         self._mdf._parent = self
 
+    @property
+    def attachments(self) -> list:
+        return self._mdf.attachments
+
+    @property
+    def channels_db(self) -> ChannelsDB:
+        return self._mdf.channels_db
+
+    @property
+    def events(self) -> list:
+        return self._mdf.events
+
+    @property
+    def groups(self) -> list[Group]:
+        return self._mdf.groups
+
+    @property
+    def header(self) -> v2_v3_blocks.HeaderBlock | v4_blocks.HeaderBlock:
+        return self._mdf.header
+
+    @property
+    def masters_db(self) -> dict:
+        return self._mdf.masters_db
+
+    @property
+    def name(self) -> Path:
+        return self._mdf.name
+
+    @property
+    def original_name(self) -> Path:
+        return self._mdf.original_name
+
+    @original_name.setter
+    def original_name(self, value: Path) -> None:
+        self._mdf.original_name = value
+
+    @property
+    def password(self) -> str:
+        return self._mdf.password
+
+    @property
+    def version(self) -> str:
+        return self._mdf.version
+
     def __setattr__(self, item: str, value: Any) -> None:
         if item == "_mdf":
             super().__setattr__(item, value)
@@ -375,11 +419,12 @@ class MDF:
             setattr(self._mdf, item, value)
 
     def __getattr__(self, item: str) -> Any:
-        warnings.warn(
-            "accessing an attribute from the underlying '_mdf' object might be deprecated in the future in favor of a public method on the MDF class. If no public method is available yet, please open a pull request to add it.",
-            category=PendingDeprecationWarning,
-            stacklevel=2,
-        )
+        if item != "_mdf":
+            warnings.warn(
+                "accessing an attribute from the underlying '_mdf' object might be deprecated in the future in favor of a public method on the MDF class. If no public method is available yet, please open a pull request to add it.",
+                category=PendingDeprecationWarning,
+                stacklevel=2,
+            )
         return getattr(self._mdf, item)
 
     def __dir__(self) -> list[str]:
@@ -631,18 +676,6 @@ class MDF:
 
         """
         yield from self.iter_channels()
-
-    @property
-    def version(self) -> Version:
-        return self._mdf.version
-
-    @property
-    def groups(self) -> list[Group]:
-        return self._mdf.groups
-
-    @property
-    def channels_db(self) -> ChannelsDB:
-        return self._mdf.channels_db
 
     def configure(
         self,
@@ -4992,8 +5025,8 @@ class MDF:
                     (
                         signal.interp(
                             master,
-                            integer_interpolation_mode=self._integer_interpolation,
-                            float_interpolation_mode=self._float_interpolation,
+                            integer_interpolation_mode=self._mdf._integer_interpolation,
+                            float_interpolation_mode=self._mdf._float_interpolation,
                         )
                         if not same_master or len(signal) != cycles
                         else signal
@@ -5227,7 +5260,7 @@ class MDF:
 
         out = MDF(
             version=version,
-            password=self._mdf._password,
+            password=self._mdf.password,
             use_display_names=True,
         )
 

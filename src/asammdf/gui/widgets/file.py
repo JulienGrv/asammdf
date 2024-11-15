@@ -1184,7 +1184,7 @@ class FileWidget(WithMDIArea, Ui_file_widget, QtWidgets.QWidget):
                     if result == MessageBox.Yes:
                         display_file_name = str(Path(file_name).resolve())
 
-                        _password = self.mdf._password
+                        _password = self.mdf.password
 
                         uuid = self.mdf.uuid
 
@@ -2934,7 +2934,7 @@ MultiRasterSeparator;&
             if handle_overwrite:
                 dspf = self.to_config()
 
-                _password = self.mdf._password
+                _password = self.mdf.password
                 self.mdf.close()
 
                 windows = list(self.mdi_area.subWindowList())
@@ -3078,7 +3078,7 @@ MultiRasterSeparator;&
                 "The display file can only be embedded in .mf4 or .mf4z files" f"\n{original_file_name}",
             )
 
-        _password = self.mdf._password
+        _password = self.mdf.password
 
         uuid = self.mdf.uuid
 
@@ -3347,7 +3347,7 @@ MultiRasterSeparator;&
             if attachment.file_name == "user_embedded_display.dspf" and attachment.mime == r"application/x-dspf":
                 encryption_info = extract_encryption_information(attachment.comment)
                 password = None
-                if encryption_info.get("encrypted", False) and self.mdf._password is None:
+                if encryption_info.get("encrypted", False) and self.mdf.password is None:
                     text, ok = QtWidgets.QInputDialog.getText(
                         self,
                         "Attachment password",

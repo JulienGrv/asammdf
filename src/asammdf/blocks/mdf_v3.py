@@ -190,7 +190,7 @@ class MDF3(MDF_Common):
         self.determine_max_vlsd_sample_size = lru_cache(maxsize=1024 * 1024)(self._determine_max_vlsd_sample_size)
 
         self._kwargs = kwargs
-        self._password = kwargs.get("password", None)
+        self.password = kwargs.get("password", None)
         self.original_name = kwargs["original_name"]
         if channels is None:
             self.load_filter = set()

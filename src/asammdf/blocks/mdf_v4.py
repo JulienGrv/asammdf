@@ -331,7 +331,7 @@ class MDF4(MDF_Common):
         )
 
         self._remove_source_from_channel_names = kwargs.get("remove_source_from_channel_names", False)
-        self._password = kwargs.get("password", None)
+        self.password = kwargs.get("password", None)
         self._force_attachment_encryption = kwargs.get("force_attachment_encryption", False)
         self.copy_on_get = kwargs.get("copy_on_get", True)
         self.compact_vlsd = kwargs.get("compact_vlsd", False)
@@ -6324,7 +6324,7 @@ class MDF4(MDF_Common):
 
         """
         if self._force_attachment_encryption:
-            password = password or self._password
+            password = password or self.password
 
         if password and not CRYPTOGRAPHY_AVAILABLE:
             raise MdfException("cryptography must be installed for attachment encryption")
@@ -6511,7 +6511,7 @@ class MDF4(MDF_Common):
             tuple of attachment data and path
 
         """
-        password = password or self._password
+        password = password or self.password
         if index is None:
             return b"", Path(""), md5().digest()
 
