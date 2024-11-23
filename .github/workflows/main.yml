@@ -70,7 +70,7 @@ jobs:
       - name: Publish Tests Summary
         if: ${{ failure() || success() }}
         run: |
-          pip install junitparser
+          pip install --requirement ci/requirements.txt
           python -c "from ci import report_tests; report_tests(header='## Unit-tests Report:')"
 
       - name: Coveralls Parallel

@@ -14,7 +14,8 @@ class ChannelGroupInfoWidget(Ui_ChannelGroupInfo, QtWidgets.QWidget):
         self.setupUi(self)
 
         self.mdf = mdf
-        self.group = self.mdf[group_index]
+        self.group_index = group_index
+        self.group = self.mdf.groups[group_index]
         channel_group = self.group.channel_group
 
         self.channel_group_label.setText(channel_group.metadata())
@@ -79,7 +80,7 @@ class ChannelGroupInfoWidget(Ui_ChannelGroupInfo, QtWidgets.QWidget):
         record_count = record_end - record_offset
 
         data = b"".join(
-            e[0] for e in self.mdf.load_data(group_index, record_offset=record_offset, record_count=record_count)
+            e[0] for e in self.mdf.load_data(self.group_index, record_offset=record_offset, record_count=record_count)
         )
 
         data = pd.Series(list(np.frombuffer(data, dtype=f"({self.record_size},)u1")))

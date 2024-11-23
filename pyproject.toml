@@ -93,7 +93,7 @@ skip = ["pp*", "*_ppc64le", "*-musllinux*", "*_s390x"]
 
 [tool.mypy]
 files = "."
-exclude = ["doc/_build/", "src/asammdf/gui/"]
+exclude = ["build/", "dist/", "doc/_build/", "src/asammdf/gui/"]
 python_version = "3.9"
 plugins = ["numpy.typing.mypy_plugin"]
 
