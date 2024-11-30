@@ -1548,7 +1548,7 @@ def csv_int2bin(val) -> str:
 csv_int2bin = np.vectorize(csv_int2bin, otypes=[str])
 
 
-def csv_int2hex(val) -> str:
+def csv_int2hex(val: pd.Series[bool]) -> str:
     """format CAN id as hex
 
     100 -> 64
@@ -1561,21 +1561,19 @@ def csv_int2hex(val) -> str:
 csv_int2hex = np.vectorize(csv_int2hex, otypes=[str])
 
 
-def csv_bytearray2hex(val, size: int | None = None) -> str:
+def csv_bytearray2hex(val: NDArray[Any], size: int | None = None) -> str:
     """format CAN payload as hex strings
 
     b'\xa2\xc3\x08' -> A2 C3 08
 
     """
     if size is not None:
-        val = val.tobytes()[:size].hex(" ", 1).upper()
+        return val.tobytes()[:size].hex(" ", 1).upper()
     else:
         try:
-            val = val.tobytes().hex(" ", 1).upper()
+            return val.tobytes().hex(" ", 1).upper()
         except:
-            val = "●"
-
-    return val
+            return "●"
 
 
 csv_bytearray2hex = np.vectorize(csv_bytearray2hex, otypes=[str])

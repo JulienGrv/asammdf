@@ -153,7 +153,16 @@ def get_temporary_filename(path: Path = Path("temporary.mf4"), dir: str | Path |
     return tmp_path
 
 
-class _MatlabKwargs(TypedDict, total=False):
+class _CsvKwargs(TypedDict, total=False):
+    delimiter: str
+    doublequote: bool
+    lineterminator: str
+    quotechar: str
+    quoting: int
+    escapechar: Optional[str]
+
+
+class _MatKwargs(TypedDict, total=False):
     format: Literal["4", "5", "7.3"]
     do_compression: bool
     oned_as: Literal["column", "row"]
@@ -166,7 +175,7 @@ class _ParquetKwargs(TypedDict, total=False):
     compression: _ParquetCompression
 
 
-class _ExportKwargs(_MatlabKwargs, _ParquetKwargs, total=False):
+class _ExportKwargs(_CsvKwargs, _MatKwargs, _ParquetKwargs, total=False):
     single_time_base: bool
     raster: float
     time_from_zero: bool
@@ -1315,8 +1324,10 @@ class MDF:
 
                 needs_cutting = True
 
-                # check if this fragmement is within the cut interval or
+                # check if this fragment is within the cut interval or
                 # if the cut interval has ended
+                start_index: Union[int, np.int64]
+                stop_index: Union[int, np.int64]
                 if start is None and stop is None:
                     fragment_start = None
                     fragment_stop = None
@@ -1781,16 +1792,16 @@ class MDF:
                             else:
                                 continue
 
-                        if compression:
-                            dataset = group.create_dataset(channel, data=samples, compression=compression)
-                        else:
-                            dataset = group.create_dataset(channel, data=samples)
-                        unit = unit.replace("\0", "")
-                        if unit:
-                            dataset.attrs["unit"] = unit
-                        comment = comment.replace("\0", "")
-                        if comment:
-                            dataset.attrs["comment"] = comment
+                            if compression:
+                                dataset = group.create_dataset(channel, data=samples, compression=compression)
+                            else:
+                                dataset = group.create_dataset(channel, data=samples)
+                            unit = unit.replace("\0", "")
+                            if unit:
+                                dataset.attrs["unit"] = unit
+                            comment = comment.replace("\0", "")
+                            if comment:
+                                dataset.attrs["comment"] = comment
 
                         if progress is not None:
                             if callable(progress):
@@ -1914,15 +1925,16 @@ class MDF:
                                     return TERMINATED
 
         elif fmt == "csv":
-            fmtparams = {
+            fmtparams: _CsvKwargs = {
                 "delimiter": kwargs.get("delimiter", ",")[0],
                 "doublequote": kwargs.get("doublequote", True),
                 "lineterminator": kwargs.get("lineterminator", "\r\n"),
                 "quotechar": kwargs.get("quotechar", '"')[0],
             }
 
-            quoting = kwargs.get("quoting", "MINIMAL").upper()
-            quoting = getattr(csv, f"QUOTE_{quoting}")
+            quoting = kwargs.get("quoting", csv.QUOTE_MINIMAL)
+            if isinstance(quoting, str):
+                quoting = getattr(csv, f"QUOTE_{quoting.upper()}")
 
             fmtparams["quoting"] = quoting
 
@@ -1952,7 +1964,7 @@ class MDF:
                     units["timestamps"] = "s"
 
                 if hasattr(self, "can_logging_db") and self.can_logging_db:
-                    dropped: dict[str, pd.Series[str]] = {}
+                    dropped: dict[str, pd.Series[Any]] = {}
 
                     for name_ in df.columns:
                         if name_.endswith("CAN_DataFrame.ID"):
@@ -1962,14 +1974,14 @@ class MDF:
                             )
 
                         elif name_.endswith("CAN_DataFrame.DataBytes"):
-                            dropped[name_] = pd.Series(csv_bytearray2hex(df[name_]), index=df.index)
+                            dropped[name_] = pd.Series(csv_bytearray2hex(df[name_].to_numpy()), index=df.index)
 
                     df = df.drop(columns=list(dropped))
                     for name, s in dropped.items():
                         df[name] = s
 
                 with open(filename, "w", newline="") as csvfile:
-                    writer = csv.writer(csvfile, **fmtparams)
+                    writer = csv.writer(csvfile, **fmtparams)  # type: ignore[arg-type]
 
                     names_row = [df.index.name, *df.columns]
                     writer.writerow(names_row)
@@ -2123,7 +2135,7 @@ class MDF:
                                     )
 
                                 elif name_.endswith("CAN_DataFrame.DataBytes"):
-                                    dropped[name_] = pd.Series(csv_bytearray2hex(df[name_]), index=df.index)
+                                    dropped[name_] = pd.Series(csv_bytearray2hex(df[name_].to_numpy()), index=df.index)
 
                             df = df.drop(columns=list(dropped))
                             for name_, s in dropped.items():
