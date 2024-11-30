@@ -33,7 +33,7 @@ import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
 from pandas.api.extensions import ExtensionArray
-from typing_extensions import Literal
+from typing_extensions import Literal, TypedDict, Unpack
 
 from . import tool
 from .blocks import bus_logging_utils, mdf_v2, mdf_v3, mdf_v4, v2_v3_blocks, v4_blocks
@@ -151,6 +151,31 @@ def get_temporary_filename(path: Path = Path("temporary.mf4"), dir: str | Path |
             idx += 1
 
     return tmp_path
+
+
+class _MatlabKwargs(TypedDict, total=False):
+    format: Literal["4", "5", "7.3"]
+    do_compression: bool
+    oned_as: Literal["column", "row"]
+
+
+_ParquetCompression = Literal["gzip", "bz2", "brotli", "lz4", "zstd", "snappy", "none"]
+
+
+class _ParquetKwargs(TypedDict, total=False):
+    compression: _ParquetCompression
+
+
+class _ExportKwargs(_MatlabKwargs, _ParquetKwargs, total=False):
+    single_time_base: bool
+    raster: float
+    time_from_zero: bool
+    use_display_names: bool
+    empty_channels: Literal["skip"]
+    reduce_memory_usage: bool
+    time_as_date: bool
+    ignore_value2text_conversions: bool
+    raw: bool
 
 
 class MDF:
@@ -1444,7 +1469,7 @@ class MDF:
         fmt: Literal["asc", "csv", "hdf5", "mat", "parquet"],
         filename: StrPathType | None = None,
         progress: Callable[[int, int], None] | Any | None = None,
-        **kwargs,
+        **kwargs: Unpack[_ExportKwargs],
     ) -> object | None:
         r"""export *MDF* to other formats. The *MDF* file name is used is
         available, else the *filename* argument must be provided.
@@ -1590,24 +1615,25 @@ class MDF:
         format = kwargs.get("format", "5")
         oned_as = kwargs.get("oned_as", "row")
         reduce_memory_usage = kwargs.get("reduce_memory_usage", False)
-        compression = kwargs.get("compression", "")
+        do_compression = kwargs.get("do_compression", False)
+        compression = typing.cast(_ParquetCompression, kwargs.get("compression", "none").lower())
         time_as_date = kwargs.get("time_as_date", False)
         ignore_value2text_conversions = kwargs.get("ignore_value2text_conversions", False)
         raw = bool(kwargs.get("raw", False))
 
-        if compression == "SNAPPY":
+        if compression == "snappy":
             try:
                 import snappy  # type: ignore[import-untyped] # noqa: F401
             except ImportError:
                 logger.warning("snappy compressor is not installed; compression will be set to GZIP")
-                compression = "GZIP"
+                compression = "gzip"
 
         filename = Path(filename) if filename else self._mdf.name
 
         if fmt == "parquet":
             try:
-                from pyarrow import table
-                from pyarrow.parquet import write_table as write_parquet
+                import pyarrow as pa
+                import pyarrow.parquet as pq
 
             except ImportError:
                 logger.warning("pyarrow not found; export to parquet is unavailable")
@@ -2296,7 +2322,7 @@ class MDF:
                     mdict,
                     long_field_names=True,
                     oned_as=oned_as,
-                    do_compression=bool(compression),
+                    do_compression=do_compression or compression not in ("", "none"),
                 )
 
             if progress is not None:
@@ -2310,11 +2336,11 @@ class MDF:
 
         elif fmt == "parquet":
             filename = filename.with_suffix(".parquet")
-            df = table(df)
+            table = pa.table(df)
             if compression:
-                write_parquet(filename, df, compression=compression)
+                pq.write_table(table, filename, compression=compression)
             else:
-                write_parquet(filename, df)
+                pq.write_table(table, filename)
 
         else:
             message = 'Unsupported export type "{}". ' 'Please select "csv", "excel", "hdf5", "mat" or "pandas"'
@@ -5762,7 +5788,7 @@ class MDF:
         cntr = 0
 
         total_unique_ids: set[tuple[int, ...]] = set()
-        found_ids: defaultdict[StrPathType, set[tuple[int, str]]] = defaultdict(set)
+        found_ids: defaultdict[StrPathType, set[tuple[tuple[int, bool, bool], str]]] = defaultdict(set)
         not_found_ids: defaultdict[StrPathType, list[tuple[int, str]]] = defaultdict(list)
         unknown_ids_dict: defaultdict[int, list[bool]] = defaultdict(list)
 

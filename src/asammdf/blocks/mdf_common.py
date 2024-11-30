@@ -36,7 +36,7 @@ class LinBusInfo(TypedDict):
     total_unique_ids: set[tuple[int, ...]]
     unknown_id_count: int
     not_found_ids: defaultdict[StrPathType, list[tuple[int, str]]]
-    found_ids: defaultdict[StrPathType, set[tuple[int, str]]]
+    found_ids: defaultdict[StrPathType, set[tuple[tuple[int, bool, bool], str]]]
     unknown_ids: set[int]
 
 
