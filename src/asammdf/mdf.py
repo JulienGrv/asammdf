@@ -563,52 +563,52 @@ class MDF:
                     timestamp = ev_base * ev_factor
 
                     try:
-                        comment = ET.fromstring(event.comment.replace(' xmlns="http://www.asam.net/mdf/v4"', ""))
-                        pre = comment.find(".//pre_trigger_interval")
-                        if pre is not None:
-                            pre = float(pre.text)
+                        comment_elem = ET.fromstring(event.comment.replace(' xmlns="http://www.asam.net/mdf/v4"', ""))
+                        pre = comment_elem.find(".//pre_trigger_interval")
+                        if pre is not None and pre.text:
+                            pre_time = float(pre.text)
                         else:
-                            pre = 0.0
-                        post = comment.find(".//post_trigger_interval")
-                        if post is not None:
-                            post = float(post.text)
+                            pre_time = 0.0
+                        post = comment_elem.find(".//post_trigger_interval")
+                        if post is not None and post.text:
+                            post_time = float(post.text)
                         else:
-                            post = 0.0
-                        comment = comment.find(".//TX")
-                        if comment is not None:
-                            comment = comment.text
+                            post_time = 0.0
+                        comment = comment_elem.find(".//TX")
+                        if comment is not None and comment.text:
+                            comment_text = comment.text
                         else:
-                            comment = ""
+                            comment_text = ""
 
                     except:
-                        pre = 0.0
-                        post = 0.0
-                        comment = event.comment
+                        pre_time = 0.0
+                        post_time = 0.0
+                        comment_text = event.comment
 
-                    if comment:
-                        comment += ": "
+                    if comment_text:
+                        comment_text += ": "
 
                     if ev_range == v4c.EVENT_RANGE_TYPE_BEGINNING:
-                        comment += "Begin of "
+                        comment_text += "Begin of "
                     elif ev_range == v4c.EVENT_RANGE_TYPE_END:
-                        comment += "End of "
+                        comment_text += "End of "
                     else:
-                        comment += "Single point "
+                        comment_text += "Single point "
 
                     if ev_type == v4c.EVENT_TYPE_RECORDING:
-                        comment += "recording"
+                        comment_text += "recording"
                     elif ev_type == v4c.EVENT_TYPE_RECORDING_INTERRUPT:
-                        comment += "recording interrupt"
+                        comment_text += "recording interrupt"
                     elif ev_type == v4c.EVENT_TYPE_ACQUISITION_INTERRUPT:
-                        comment += "acquisition interrupt"
+                        comment_text += "acquisition interrupt"
                     elif ev_type == v4c.EVENT_TYPE_START_RECORDING_TRIGGER:
-                        comment += "measurement start trigger"
+                        comment_text += "measurement start trigger"
                     elif ev_type == v4c.EVENT_TYPE_STOP_RECORDING_TRIGGER:
-                        comment += "measurement stop trigger"
+                        comment_text += "measurement stop trigger"
                     elif ev_type == v4c.EVENT_TYPE_TRIGGER:
-                        comment += "trigger"
+                        comment_text += "trigger"
                     else:
-                        comment += "marker"
+                        comment_text += "marker"
 
                     scopes = get_scopes(event, other._mdf.events)
                     if scopes:
@@ -630,23 +630,23 @@ class MDF:
                                 self._mdf.add_trigger(
                                     dg_cntr,
                                     timestamp,
-                                    pre_time=pre,
-                                    post_time=post,
-                                    comment=comment,
+                                    pre_time=pre_time,
+                                    post_time=post_time,
+                                    comment=comment_text,
                                 )
                     else:
                         for i, _ in enumerate(self._mdf.groups):
                             self._mdf.add_trigger(
                                 i,
                                 timestamp,
-                                pre_time=pre,
-                                post_time=post,
-                                comment=comment,
+                                pre_time=pre_time,
+                                post_time=post_time,
+                                comment=comment_text,
                             )
 
         else:
             for trigger_info in other._mdf.iter_get_triggers():
-                comment = trigger_info["comment"]
+                comment_text = trigger_info["comment"]
                 timestamp = trigger_info["time"]
                 group = trigger_info["group"]
 
@@ -656,7 +656,7 @@ class MDF:
                         timestamp,
                         pre_time=trigger_info["pre_time"],
                         post_time=trigger_info["post_time"],
-                        comment=comment,
+                        comment=comment_text,
                     )
                 else:
                     if timestamp:
@@ -667,9 +667,9 @@ class MDF:
                         event_type=ev_type,
                         sync_base=int(timestamp * 10**9),
                         sync_factor=10**-9,
-                        scope_0_addr=0,
+                        scope_0_addr=0,  # type: ignore[call-arg]
                     )
-                    event.comment = comment
+                    event.comment = comment_text
                     event.scopes.append(group)
                     self._mdf.events.append(event)
 
@@ -1266,12 +1266,13 @@ class MDF:
         self.configure(copy_on_get=False)
 
         if whence == 1:
-            timestamps = []
+            timestamps: list[float] = []
             for group in self._mdf.virtual_groups:
                 master = self._mdf.get_master(group, record_offset=0, record_count=1)
                 if master.size:
                     timestamps.append(master[0])
 
+            first_timestamp: float
             if timestamps:
                 first_timestamp = np.amin(timestamps)
             else:

@@ -284,7 +284,7 @@ class MDF4(MDF_Common):
         self.attachments = []
         self._attachments_cache = {}
         self.file_comment = None
-        self.events = []
+        self.events: list[EventBlock] = []
         self.bus_logging_map = {"CAN": {}, "ETHERNET": {}, "FLEXRAY": {}, "LIN": {}}
 
         self._attachments_map: dict[int, int] = {}
