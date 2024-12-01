@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from io import BufferedReader, BytesIO
+from typing_extensions import Literal
 
 from ..types import StrPathType
-from .mdf_v3 import MDF3, Version
-from .utils import MdfException, validate_version_argument
+from .mdf_v3 import MDF3
+from .utils import FileLike, MdfException, validate_version_argument
 
 __all__ = ["MDF2"]
+
+Version = Literal["2.00", "2.10", "2.14"]
 
 
 # MDF versions 2 and 3 share the same implementation
@@ -19,7 +21,7 @@ class MDF2(MDF3):
 
     def __init__(
         self,
-        name: BufferedReader | BytesIO | StrPathType | None = None,
+        name: StrPathType | FileLike | None = None,
         version: Version = default_version,
         **kwargs,
     ) -> None:

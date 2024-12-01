@@ -117,7 +117,7 @@ class SearchMode(Enum):
     wildcard = "wildcard"
 
 
-Version = Union[mdf_v4.Version, mdf_v3.Version]
+Version = Union[mdf_v4.Version, mdf_v3.Version, mdf_v2.Version]
 
 
 def get_measurement_timestamp_and_version(mdf: FileLike | BinaryIO) -> tuple[datetime, Version]:
@@ -381,10 +381,13 @@ class MDF:
             kwargs["__internal__"] = True
             version = validate_version_argument(version, mdf_v4.MDF4.default_version)
             if version in MDF2_VERSIONS:
+                version = typing.cast(mdf_v2.Version, version)
                 self._mdf = mdf_v2.MDF2(version=version, **kwargs)
             elif version in MDF3_VERSIONS:
+                version = typing.cast(mdf_v3.Version, version)
                 self._mdf = mdf_v3.MDF3(version=version, **kwargs)
             elif version in MDF4_VERSIONS:
+                version = typing.cast(mdf_v4.Version, version)
                 self._mdf = mdf_v4.MDF4(version=version, **kwargs)
             else:
                 message = (

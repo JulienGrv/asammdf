@@ -11,7 +11,6 @@ from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
 from hashlib import md5
-from io import BufferedReader, BytesIO
 import logging
 from math import ceil, floor
 import mmap
@@ -22,7 +21,7 @@ import shutil
 import sys
 from tempfile import gettempdir, NamedTemporaryFile
 from traceback import format_exc
-from typing import Any, Optional, overload, SupportsBytes
+from typing import Any, BinaryIO, Optional, overload, SupportsBytes
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import canmatrix
@@ -95,6 +94,7 @@ from .utils import (
     extract_display_names,
     extract_encryption_information,
     extract_xml_comment,
+    FileLike,
     fmt_to_datatype_v4,
     get_fmt_v4,
     get_text_v4,
@@ -264,7 +264,7 @@ class MDF4(MDF_Common):
 
     def __init__(
         self,
-        name: BufferedReader | BytesIO | StrPathType | None = None,
+        name: StrPathType | FileLike | None = None,
         version: Version = default_version,
         channels: list[str] | None = None,
         **kwargs,
@@ -315,7 +315,8 @@ class MDF4(MDF_Common):
             self.use_load_filter = True
 
         self._tempfile = NamedTemporaryFile(dir=self.temporary_folder)
-        self._file = self._mapped_file = None
+        self._mapped_file: Optional[BinaryIO] = None
+        self._file = self._mapped_file
 
         self._read_fragment_size = get_global_option("read_fragment_size")
         self._write_fragment_size = get_global_option("write_fragment_size")
@@ -366,8 +367,7 @@ class MDF4(MDF_Common):
                 try:
                     with open(name, "rb") as stream:
                         identification = FileIdentificationBlock(stream=stream)
-                        version = identification["version_str"]
-                        version = version.decode("utf-8").strip(" \n\t\0")
+                        version = identification.version_str.decode("utf-8").strip(" \n\t\0")
                         flags = identification["unfinalized_standard_flags"]
 
                     if version >= "4.10" and flags:

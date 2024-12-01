@@ -7,7 +7,6 @@ from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
-from io import BufferedReader, BytesIO
 from itertools import product
 import logging
 from math import ceil
@@ -60,6 +59,7 @@ from .utils import (
     CONVERT,
     count_channel_groups,
     DataBlockInfo,
+    FileLike,
     fmt_to_datatype_v3,
     get_fmt_v3,
     get_text_v3,
@@ -94,7 +94,7 @@ logger = logging.getLogger("asammdf")
 
 __all__ = ["MDF3"]
 
-Version = Literal["2.00", "2.10", "2.14", "3.00", "3.10", "3.20", "3.30"]
+Version = Literal["3.00", "3.10", "3.20", "3.30"]
 
 Group = mdf_common.Group[DataGroup, ChannelGroup, Channel]
 
@@ -181,7 +181,7 @@ class MDF3(MDF_Common):
 
     def __init__(
         self,
-        name: BufferedReader | BytesIO | StrPathType | None = None,
+        name: StrPathType | FileLike | None = None,
         version: Version = default_version,
         channels: list[str] | None = None,
         **kwargs,

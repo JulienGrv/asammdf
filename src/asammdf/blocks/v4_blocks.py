@@ -5307,7 +5307,7 @@ class EventBlock(_EventBlockBase):
         return address
 
 
-class _FileIdentificationBlockKwargs(BlockKwargs):
+class _FileIdentificationBlockKwargs(BlockKwargs, total=False):
     version: str
 
 
