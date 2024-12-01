@@ -399,6 +399,8 @@ class MDF:
 
     @property
     def attachments(self) -> list:
+        if not isinstance(self._mdf, mdf_v4.MDF4):
+            raise MdfException("the attribute 'attachments' is only available for MDF4")
         return self._mdf.attachments
 
     @property
@@ -406,7 +408,9 @@ class MDF:
         return self._mdf.channels_db
 
     @property
-    def events(self) -> list:
+    def events(self) -> list[EventBlock]:
+        if not isinstance(self._mdf, mdf_v4.MDF4):
+            raise MdfException("the attribute 'events' is only available for MDF4")
         return self._mdf.events
 
     @property
@@ -499,6 +503,7 @@ class MDF:
         else:
             t_min = []
             for i, group in enumerate(self._mdf.groups):
+                group = typing.cast(Union[mdf_v3.Group, mdf_v4.Group], group)
                 cycles_nr = group.channel_group.cycles_nr
                 if cycles_nr and i in self._mdf.masters_db:
                     master_min = self._mdf.get_master(i, record_offset=0, record_count=1)
@@ -507,6 +512,7 @@ class MDF:
 
             other_t_min = []
             for i, group in enumerate(other._mdf.groups):
+                group = typing.cast(Union[mdf_v3.Group, mdf_v4.Group], group)
                 cycles_nr = group.channel_group.cycles_nr
                 if cycles_nr and i in other._mdf.masters_db:
                     master_min = other._mdf.get_master(i, record_offset=0, record_count=1)
@@ -1717,13 +1723,7 @@ class MDF:
                 if progress is not None and not callable(progress) and progress.stop:
                     return TERMINATED
 
-                grp = typing.cast(
-                    Union[
-                        Group[v2_v3_blocks.DataGroup, v2_v3_blocks.ChannelGroup, v2_v3_blocks.Channel],
-                        Group[v4_blocks.DataGroup, v4_blocks.ChannelGroup, v4_blocks.Channel],
-                    ],
-                    grp,
-                )
+                grp = typing.cast(Union[mdf_v3.Group, mdf_v4.Group], grp)
                 for ch in grp.channels:
                     if use_display_names:
                         channel_name = list(ch.display_names)[0] if ch.display_names else ch.name

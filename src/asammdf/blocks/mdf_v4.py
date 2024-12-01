@@ -22,7 +22,7 @@ import shutil
 import sys
 from tempfile import gettempdir, NamedTemporaryFile
 from traceback import format_exc
-from typing import Any, overload, SupportsBytes
+from typing import Any, Optional, overload, SupportsBytes
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import canmatrix
@@ -71,7 +71,7 @@ from ..types import (
     StrPathType,
     WritableBufferType,
 )
-from . import bus_logging_utils
+from . import bus_logging_utils, mdf_common
 from . import v4_constants as v4c
 from .conversion_utils import conversion_transfer
 from .cutils import (
@@ -175,6 +175,8 @@ __all__ = ["MDF4"]
 
 Version = Literal["4.00", "4.10", "4.11", "4.20"]
 
+Group = mdf_common.Group[DataGroup, ChannelGroup, Channel]
+
 
 class MDF4(MDF_Common):
     """The *header* attibute is a *HeaderBlock*.
@@ -276,7 +278,7 @@ class MDF4(MDF_Common):
 
         self._kwargs = kwargs
         self.original_name = kwargs["original_name"]
-        self.groups: list[Group[DataGroup, ChannelGroup, Channel]] = []
+        self.groups: list[Group] = []
         self.identification = None
         self.file_history: list[FileHistory] = []
         self.channels_db = ChannelsDB()
@@ -412,7 +414,7 @@ class MDF4(MDF_Common):
 
             self.name = Path("__new__.mf4")
 
-        self._parent = None
+        self._parent: Optional[object] = None
 
     def __del__(self) -> None:
         self.close()
@@ -1371,7 +1373,7 @@ class MDF4(MDF_Common):
 
     def _load_data(
         self,
-        group: Group[DataGroup, ChannelGroup, Channel],
+        group: Group,
         record_offset: int = 0,
         record_count: int | None = None,
         optimize_read: bool = False,
@@ -1713,7 +1715,7 @@ class MDF4(MDF_Common):
                 else:
                     yield b"", 0, 0, None
 
-    def _prepare_record(self, group: Group[DataGroup, ChannelGroup, Channel]) -> list:
+    def _prepare_record(self, group: Group) -> list:
         """compute record
 
         Parameters

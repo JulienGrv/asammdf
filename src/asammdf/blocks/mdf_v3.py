@@ -18,7 +18,7 @@ import sys
 from tempfile import NamedTemporaryFile
 import time
 from traceback import format_exc
-from typing import Any, overload
+from typing import Any, Optional, overload
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -46,10 +46,11 @@ from typing_extensions import Literal, TypedDict
 from .. import tool
 from ..signal import Signal
 from ..types import ChannelsType, CompressionType, RasterType, StrPathType
+from . import mdf_common
 from . import v2_v3_constants as v23c
 from .conversion_utils import conversion_transfer
 from .cutils import data_block_from_arrays, get_channel_raw_bytes
-from .mdf_common import BusInfo, Group, MDF_Common
+from .mdf_common import BusInfo, MDF_Common
 from .options import get_global_option
 from .source_utils import Source
 from .utils import (
@@ -94,6 +95,8 @@ logger = logging.getLogger("asammdf")
 __all__ = ["MDF3"]
 
 Version = Literal["2.00", "2.10", "2.14", "3.00", "3.10", "3.20", "3.30"]
+
+Group = mdf_common.Group[DataGroup, ChannelGroup, Channel]
 
 
 class TriggerInfoDict(TypedDict):
@@ -201,7 +204,7 @@ class MDF3(MDF_Common):
 
         self.temporary_folder = kwargs.get("temporary_folder", get_global_option("temporary_folder"))
 
-        self.groups: list[Group[DataGroup, ChannelGroup, Channel]] = []
+        self.groups: list[Group] = []
         self.identification = None
         self.channels_db = ChannelsDB()
         self.masters_db = {}
@@ -294,14 +297,14 @@ class MDF3(MDF_Common):
             virtual_channel_group.record_size = grp.channel_group.samples_byte_nr
             virtual_channel_group.cycles_nr = grp.channel_group.cycles_nr
 
-        self._parent = None
+        self._parent: Optional[object] = None
 
     def __del__(self) -> None:
         self.close()
 
     def _load_data(
         self,
-        group: Group[DataGroup, ChannelGroup, Channel],
+        group: Group,
         record_offset: int = 0,
         record_count: int | None = None,
     ) -> Iterator[tuple[bytes, int, int | None]]:
@@ -510,7 +513,7 @@ class MDF3(MDF_Common):
         if not has_yielded:
             yield b"", 0, _count
 
-    def _prepare_record(self, group: Group[DataGroup, ChannelGroup, Channel]) -> list:
+    def _prepare_record(self, group: Group) -> list:
         """compute record list
 
         Parameters
