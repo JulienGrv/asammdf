@@ -19,7 +19,8 @@ import sys
 from tempfile import TemporaryDirectory
 from time import perf_counter
 from traceback import format_exc
-from typing import Any, BinaryIO, overload, Protocol, TypeVar
+import typing
+from typing import Any, BinaryIO, overload, Protocol
 import xml.etree.ElementTree as ET
 
 from canmatrix.canmatrix import CanMatrix, matrix_class
@@ -950,10 +951,22 @@ def count_channel_groups(
     return count, ch_count
 
 
-_T = TypeVar("_T", bound=str)
+Version = Literal[
+    "2.00",
+    "2.10",
+    "2.14",
+    "3.00",
+    "3.10",
+    "3.20",
+    "3.30",
+    "4.00",
+    "4.10",
+    "4.11",
+    "4.20",
+]
 
 
-def validate_version_argument(version: _T, hint: _T) -> _T:
+def validate_version_argument(version: str, hint: Version) -> Version:
     """validate the version argument against the supported MDF versions. The
     default version used depends on the hint MDF major revision
 
@@ -961,12 +974,12 @@ def validate_version_argument(version: _T, hint: _T) -> _T:
     ----------
     version : str
         requested MDF version
-    hint : int
+    hint : Version
         MDF revision hint
 
     Returns
     -------
-    valid_version : str
+    valid_version : Version
         valid version
 
     """
@@ -976,7 +989,7 @@ def validate_version_argument(version: _T, hint: _T) -> _T:
         message = message.format(version, SUPPORTED_VERSIONS, valid_version)
         logger.warning(message)
     else:
-        valid_version = version
+        valid_version = typing.cast(Version, version)
     return valid_version
 
 
@@ -1057,7 +1070,7 @@ def is_file_like(obj: object) -> TypeIs[FileLike]:
 
     Examples
     --------
-    >>> buffer(StringIO("data"))
+    >>> buffer = BytesIO(b"data")
     >>> is_file_like(buffer)
     True
     >>> is_file_like([1, 2, 3])

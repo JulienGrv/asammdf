@@ -315,8 +315,8 @@ class MDF4(MDF_Common):
             self.use_load_filter = True
 
         self._tempfile = NamedTemporaryFile(dir=self.temporary_folder)
-        self._mapped_file: Optional[BinaryIO] = None
-        self._file = self._mapped_file
+        self._mapped_file: Optional[mmap.mmap] = None
+        self._file: Optional[BinaryIO] = self._mapped_file
 
         self._read_fragment_size = get_global_option("read_fragment_size")
         self._write_fragment_size = get_global_option("write_fragment_size")
@@ -405,7 +405,7 @@ class MDF4(MDF_Common):
             version = validate_version_argument(version, self.default_version)
             self.header = HeaderBlock()
             self.identification = FileIdentificationBlock(version=version)
-            self.version = version
+            self.version: str = version
 
             if self.version >= "4.20":
                 self._column_storage = kwargs.get("column_storage", True)

@@ -120,7 +120,7 @@ class SearchMode(Enum):
 Version = Union[mdf_v4.Version, mdf_v3.Version, mdf_v2.Version]
 
 
-def get_measurement_timestamp_and_version(mdf: FileLike | BinaryIO) -> tuple[datetime, Version]:
+def get_measurement_timestamp_and_version(mdf: FileLike | BinaryIO) -> tuple[datetime, str]:
     id_block = FileIdentificationBlock(address=0, stream=mdf)
 
     version = id_block.mdf_version
@@ -253,7 +253,7 @@ class MDF:
 
     def __init__(
         self,
-        name: StrPathType | FileLike | None = None,
+        name: StrPathType | FileLike | zipfile.ZipFile | None = None,
         version: Version = "4.10",
         channels: list[str] | None = None,
         **kwargs,
@@ -315,7 +315,7 @@ class MDF:
                 else:
                     raise Exception("invalid zipped MF4: no supported file found in the archive")
 
-                name = get_temporary_filename(Path(original_name), dir=temporary_folder)
+                name = get_temporary_filename(Path(fname), dir=temporary_folder)
 
                 tmpdir = mkdtemp()
                 output = archive.extract(fname, tmpdir)
@@ -353,12 +353,12 @@ class MDF:
             if magic_header.strip() not in (b"MDF", b"UnFinMF"):
                 if do_close:
                     file_stream.close()
-                raise MdfException(f'"{name}" is not a valid ASAM MDF file: magic header is {magic_header}')
+                raise MdfException(f'"{name}" is not a valid ASAM MDF file: magic header is {magic_header!r}')
 
             file_stream.seek(8)
-            version = file_stream.read(4).decode("ascii").strip(" \0")
-            if not version:
-                _, version = get_measurement_timestamp_and_version(file_stream)
+            version_str = file_stream.read(4).decode("ascii").strip(" \0")
+            if not version_str:
+                _, version_str = get_measurement_timestamp_and_version(file_stream)
 
             if do_close:
                 file_stream.close()
@@ -366,14 +366,14 @@ class MDF:
             kwargs["original_name"] = original_name
             kwargs["__internal__"] = True
 
-            if version in MDF3_VERSIONS:
+            if version_str in MDF3_VERSIONS:
                 self._mdf = mdf_v3.MDF3(name, channels=channels, **kwargs)
-            elif version in MDF4_VERSIONS:
+            elif version_str in MDF4_VERSIONS:
                 self._mdf = mdf_v4.MDF4(name, channels=channels, **kwargs)
-            elif version in MDF2_VERSIONS:
+            elif version_str in MDF2_VERSIONS:
                 self._mdf = mdf_v2.MDF2(name, channels=channels, **kwargs)
             else:
-                message = f'"{name}" is not a supported MDF file; "{version}" file version was found'
+                message = f'"{name}" is not a supported MDF file; "{version_str}" file version was found'
                 raise MdfException(message)
 
         else:
@@ -1259,7 +1259,7 @@ class MDF:
         """
 
         if version is None:
-            version = self._mdf.version
+            version = validate_version_argument(self._mdf.version, self._mdf.default_version)
         else:
             version = validate_version_argument(version, self._mdf.default_version)
 
@@ -2444,7 +2444,7 @@ class MDF:
 
         """
         if version is None:
-            version = self._mdf.version
+            version = validate_version_argument(self._mdf.version, self._mdf.default_version)
         else:
             version = validate_version_argument(version, self._mdf.default_version)
 
@@ -2707,7 +2707,7 @@ class MDF:
 
         input_types = [isinstance(file, MDF) for file in files]
 
-        versions: list[Version] = []
+        versions: list[str] = []
         if sync:
             datetimes: list[datetime] = []
             for file in files:
@@ -2716,14 +2716,14 @@ class MDF:
                     versions.append(file._mdf.version)
                 else:
                     if is_file_like(file):
-                        ts, version = get_measurement_timestamp_and_version(file)
+                        ts, version_str = get_measurement_timestamp_and_version(file)
                         datetimes.append(ts)
-                        versions.append(version)
+                        versions.append(version_str)
                     else:
                         with open(file, "rb") as bytes_io:
-                            ts, version = get_measurement_timestamp_and_version(bytes_io)
+                            ts, version_str = get_measurement_timestamp_and_version(bytes_io)
                             datetimes.append(ts)
-                            versions.append(version)
+                            versions.append(version_str)
 
             try:
                 oldest = min(datetimes)
@@ -2738,16 +2738,16 @@ class MDF:
             file = files[0]
             if isinstance(file, MDF):
                 timestamp = file._mdf.header.start_time
-                version = file._mdf.version
+                version_str = file._mdf.version
             else:
                 if is_file_like(file):
-                    timestamp, version = get_measurement_timestamp_and_version(file)
+                    timestamp, version_str = get_measurement_timestamp_and_version(file)
                 else:
                     with open(file, "rb") as bytes_io:
-                        timestamp, version = get_measurement_timestamp_and_version(bytes_io)
+                        timestamp, version_str = get_measurement_timestamp_and_version(bytes_io)
 
             oldest = timestamp
-            versions.append(version)
+            versions.append(version_str)
 
             offsets = [0 for _ in files]
 
@@ -3199,11 +3199,11 @@ class MDF:
                     datetimes.append(file._mdf.header.start_time)
                 else:
                     if is_file_like(file):
-                        ts, version = get_measurement_timestamp_and_version(file)
+                        ts, _ = get_measurement_timestamp_and_version(file)
                         datetimes.append(ts)
                     else:
                         with open(file, "rb") as bytes_io:
-                            ts, version = get_measurement_timestamp_and_version(bytes_io)
+                            ts, _ = get_measurement_timestamp_and_version(bytes_io)
                             datetimes.append(ts)
 
             try:
@@ -3229,8 +3229,6 @@ class MDF:
                 )
 
             if mdf_index == 0:
-                version = validate_version_argument(version, mdf._mdf.default_version)
-
                 kwargs = dict(mdf._mdf._kwargs)
 
                 stacked = MDF(
@@ -3613,7 +3611,7 @@ class MDF:
         """
 
         if version is None:
-            version = self._mdf.version
+            version = validate_version_argument(self._mdf.version, self._mdf.default_version)
         else:
             version = validate_version_argument(version, self._mdf.default_version)
 
@@ -5317,7 +5315,7 @@ class MDF:
             )
 
         if version is None:
-            version = self._mdf.version
+            version = validate_version_argument(self._mdf.version, self._mdf.default_version)
         else:
             version = validate_version_argument(version, self._mdf.default_version)
 
@@ -5347,7 +5345,7 @@ class MDF:
 
             if isinstance(to_keep_or_terminated, list):
                 if to_keep_or_terminated:
-                    tmp = out.filter(to_keep_or_terminated, out_mdf.version)
+                    tmp = out.filter(to_keep_or_terminated, version)
                     out_mdf.close()
                     out = tmp
 
@@ -6086,7 +6084,7 @@ class MDF:
         """
 
         if version is None:
-            version = self._mdf.version
+            version = validate_version_argument(self._mdf.version, self._mdf.default_version)
         else:
             version = validate_version_argument(version, self._mdf.default_version)
 

@@ -17,7 +17,7 @@ import sys
 from tempfile import NamedTemporaryFile
 import time
 from traceback import format_exc
-from typing import Any, Optional, overload
+from typing import Any, BinaryIO, Optional, overload
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -208,14 +208,15 @@ class MDF3(MDF_Common):
         self.identification = None
         self.channels_db = ChannelsDB()
         self.masters_db = {}
-        self.version = version
+        self.version: str = version
 
         self._master_channel_metadata = {}
         self._closed = False
 
         self._tempfile = NamedTemporaryFile(dir=self.temporary_folder)
         self._tempfile.write(b"\0")
-        self._file = self._mapped_file = None
+        self._mapped_file: Optional[mmap.mmap] = None
+        self._file: Optional[BinaryIO] = self._mapped_file
 
         self._remove_source_from_channel_names = kwargs.get("remove_source_from_channel_names", False)
 
