@@ -136,7 +136,10 @@ def get_measurement_timestamp_and_version(mdf: FileLike | BinaryIO) -> tuple[dat
     return header.start_time, version
 
 
-def get_temporary_filename(path: Path = Path("temporary.mf4"), dir: str | Path | None = None) -> Path:
+def get_temporary_filename(
+    path: Path = Path("temporary.mf4"), dir: Optional[Union[str, os.PathLike[str]]] = None
+) -> Path:
+    folder: Optional[Union[str, os.PathLike[str]]]
     if not dir:
         folder = gettempdir()
     else:
@@ -151,6 +154,12 @@ def get_temporary_filename(path: Path = Path("temporary.mf4"), dir: str | Path |
             idx += 1
 
     return tmp_path
+
+
+class Kwargs(TypedDict, total=False):
+    temporary_folder: Union[str, os.PathLike[str]]
+    password: str
+    use_display_names: bool
 
 
 class _CsvKwargs(TypedDict, total=False):
@@ -256,7 +265,7 @@ class MDF:
         name: StrPathType | FileLike | zipfile.ZipFile | None = None,
         version: Version = "4.10",
         channels: list[str] | None = None,
-        **kwargs,
+        **kwargs: Unpack[Kwargs],
     ) -> None:
         self._mdf: mdf_v2.MDF2 | mdf_v3.MDF3 | mdf_v4.MDF4
 
@@ -272,6 +281,7 @@ class MDF:
                 kwargs["temporary_folder"] = None
 
         if name:
+            original_name: Optional[StrPathType]
             if is_file_like(name):
                 if isinstance(name, (BytesIO, BufferedIOBase)):
                     original_name = None
@@ -279,7 +289,7 @@ class MDF:
                     do_close = False
 
                 elif isinstance(name, bz2.BZ2File):
-                    original_name = Path(name._fp.name)
+                    original_name = Path(name.name)
                     tmp_name = get_temporary_filename(original_name, dir=temporary_folder)
                     tmp_name.write_bytes(name.read())
                     file_stream = open(tmp_name, "rb")
@@ -447,7 +457,7 @@ class MDF:
         self._mdf.original_name = value
 
     @property
-    def password(self) -> str:
+    def password(self) -> Optional[str]:
         return self._mdf.password
 
     @property
@@ -3225,7 +3235,7 @@ class MDF:
 
             if progress is not None:
                 progress.signals.setLabelText.emit(
-                    f"Stacking file {mdf_index+1} of {files_nr}\n" f"{mdf._mdf.original_name.name}"
+                    f"Stacking file {mdf_index+1} of {files_nr}\n" f"{mdf._mdf.original_name}"
                 )
 
             if mdf_index == 0:

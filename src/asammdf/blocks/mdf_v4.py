@@ -21,7 +21,7 @@ import shutil
 import sys
 from tempfile import gettempdir, NamedTemporaryFile
 from traceback import format_exc
-from typing import Any, BinaryIO, Optional, overload, SupportsBytes
+from typing import Any, BinaryIO, Optional, overload, SupportsBytes, Union
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import canmatrix
@@ -57,7 +57,7 @@ from numpy import (
 )
 from numpy.typing import NDArray
 from pandas import DataFrame
-from typing_extensions import Literal
+from typing_extensions import Literal, Required, TypedDict, Unpack
 
 from .. import tool
 from ..signal import InvalidationArray, Signal
@@ -178,6 +178,11 @@ Version = Literal["4.00", "4.10", "4.11", "4.20"]
 Group = mdf_common.Group[DataGroup, ChannelGroup, Channel]
 
 
+class _Kwargs(TypedDict, total=False):
+    original_name: Required[Union[str, os.PathLike[str]]]
+    password: str
+
+
 class MDF4(MDF_Common):
     """The *header* attibute is a *HeaderBlock*.
 
@@ -267,7 +272,7 @@ class MDF4(MDF_Common):
         name: StrPathType | FileLike | None = None,
         version: Version = default_version,
         channels: list[str] | None = None,
-        **kwargs,
+        **kwargs: Unpack[_Kwargs],
     ) -> None:
         if not kwargs.get("__internal__", False):
             raise MdfException("Always use the MDF class; do not use the class MDF4 directly")

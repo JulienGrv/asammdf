@@ -17,7 +17,7 @@ import sys
 from tempfile import NamedTemporaryFile
 import time
 from traceback import format_exc
-from typing import Any, BinaryIO, Optional, overload
+from typing import Any, BinaryIO, Optional, overload, Union
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -40,7 +40,7 @@ from numpy import (
 )
 from numpy.typing import NDArray
 from pandas import DataFrame
-from typing_extensions import Literal, TypedDict
+from typing_extensions import Literal, Required, TypedDict, Unpack
 
 from .. import tool
 from ..signal import Signal
@@ -95,6 +95,12 @@ logger = logging.getLogger("asammdf")
 __all__ = ["MDF3"]
 
 Version = Literal["3.00", "3.10", "3.20", "3.30"]
+
+
+class _Kwargs(TypedDict, total=False):
+    original_name: Required[Union[str, os.PathLike[str]]]
+    password: str
+
 
 Group = mdf_common.Group[DataGroup, ChannelGroup, Channel]
 
@@ -184,7 +190,7 @@ class MDF3(MDF_Common):
         name: StrPathType | FileLike | None = None,
         version: Version = default_version,
         channels: list[str] | None = None,
-        **kwargs,
+        **kwargs: Unpack[_Kwargs],
     ) -> None:
         if not kwargs.get("__internal__", False):
             raise MdfException("Always use the MDF class; do not use the class MDF3 directly")
