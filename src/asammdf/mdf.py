@@ -158,7 +158,7 @@ def get_temporary_filename(
 
 class Kwargs(TypedDict, total=False):
     temporary_folder: Union[str, os.PathLike[str]]
-    password: str
+    password: Optional[str]
     use_display_names: bool
 
 
