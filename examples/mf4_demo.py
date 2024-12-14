@@ -74,7 +74,7 @@ sig = Signal(
 sigs.append(sig)
 
 # byte array
-ones = np.ones(cycles, dtype=np.dtype("(8,)u1"))
+ones = np.ones(cycles, dtype=np.dtype((np.uint8, (8,))))
 sig = Signal(ones * 111, t, name="Channel_bytearay", comment="Byte array channel")
 sigs.append(sig)
 
@@ -140,7 +140,7 @@ sigs.append(sig)
 
 mdf.append(sigs, comment="single dimensional channels", common_timebase=True)
 
-types: list[tuple[str, DTypeLike]]
+types: list[DTypeLike]
 
 sigs = []
 
