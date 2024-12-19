@@ -21,7 +21,7 @@ import shutil
 import sys
 from tempfile import gettempdir, NamedTemporaryFile
 from traceback import format_exc
-from typing import Any, BinaryIO, Optional, overload, SupportsBytes, Union
+from typing import Any, BinaryIO, Optional, overload, SupportsBytes
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import canmatrix
@@ -57,7 +57,7 @@ from numpy import (
 )
 from numpy.typing import NDArray
 from pandas import DataFrame
-from typing_extensions import Literal, Required, TypedDict, Unpack
+from typing_extensions import Literal, Unpack
 
 from .. import tool
 from ..signal import InvalidationArray, Signal
@@ -80,7 +80,7 @@ from .cutils import (
     get_vlsd_max_sample_size,
     sort_data_block,
 )
-from .mdf_common import BusInfo, debug_channel, Group, MDF_Common
+from .mdf_common import BusInfo, CommonKwargs, debug_channel, Group, MDF_Common
 from .options import get_global_option
 from .source_utils import Source
 from .utils import (
@@ -168,7 +168,6 @@ EMPTY_TUPLE = ()
 # 100 extra steps for the sorting, 1 step after sorting and 1 step at finish
 SORT_STEPS = 102
 
-
 logger = logging.getLogger("asammdf")
 
 __all__ = ["MDF4"]
@@ -178,9 +177,11 @@ Version = Literal["4.00", "4.10", "4.11", "4.20"]
 Group = mdf_common.Group[DataGroup, ChannelGroup, Channel]
 
 
-class _Kwargs(TypedDict, total=False):
-    original_name: Required[Union[str, os.PathLike[str]]]
-    password: str
+class _Kwargs(CommonKwargs, total=False):
+    force_attachment_encryption: bool
+    copy_on_get: bool
+    compact_vlsd: bool
+    column_storage: bool
 
 
 class MDF4(MDF_Common):

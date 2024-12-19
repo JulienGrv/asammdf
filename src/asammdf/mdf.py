@@ -40,7 +40,7 @@ from .blocks import bus_logging_utils, mdf_v2, mdf_v3, mdf_v4, v2_v3_blocks, v4_
 from .blocks import v2_v3_constants as v23c
 from .blocks import v4_constants as v4c
 from .blocks.conversion_utils import from_dict
-from .blocks.mdf_common import Group
+from .blocks.mdf_common import CommonKwargs, Group, MdfKwargs
 from .blocks.options import FloatInterpolation, IntegerInterpolation
 from .blocks.source_utils import Source
 from .blocks.utils import (
@@ -124,16 +124,17 @@ def get_measurement_timestamp_and_version(mdf: FileLike | BinaryIO) -> tuple[dat
     id_block = FileIdentificationBlock(address=0, stream=mdf)
 
     version = id_block.mdf_version
+    header_class: type[Union[v4_blocks.HeaderBlock, v2_v3_blocks.HeaderBlock]]
     if version >= 400:
-        header = HeaderV4
+        header_class = HeaderV4
     else:
-        header = HeaderV3
+        header_class = HeaderV3
 
-    header = header(address=64, stream=mdf)
+    header = header_class(address=64, stream=mdf)
     main_version, revision = divmod(version, 100)
-    version = f"{main_version}.{revision}"
+    version_str = f"{main_version}.{revision}"
 
-    return header.start_time, version
+    return header.start_time, version_str
 
 
 def get_temporary_filename(
@@ -154,12 +155,6 @@ def get_temporary_filename(
             idx += 1
 
     return tmp_path
-
-
-class Kwargs(TypedDict, total=False):
-    temporary_folder: Union[str, os.PathLike[str]]
-    password: Optional[str]
-    use_display_names: bool
 
 
 class _CsvKwargs(TypedDict, total=False):
@@ -265,9 +260,10 @@ class MDF:
         name: StrPathType | FileLike | zipfile.ZipFile | None = None,
         version: Version = "4.10",
         channels: list[str] | None = None,
-        **kwargs: Unpack[Kwargs],
+        **kwargs: Unpack[MdfKwargs],
     ) -> None:
         self._mdf: mdf_v2.MDF2 | mdf_v3.MDF3 | mdf_v4.MDF4
+        kwargs = typing.cast(CommonKwargs, kwargs)
 
         if "callback" in kwargs:
             kwargs["progress"] = kwargs["callback"]
@@ -449,7 +445,7 @@ class MDF:
         return self._mdf.name
 
     @property
-    def original_name(self) -> Path:
+    def original_name(self) -> Optional[Union[str, Path]]:
         return self._mdf.original_name
 
     @original_name.setter
@@ -1180,7 +1176,7 @@ class MDF:
             for signal_samples in selected_samples:
                 out._mdf.extend(cg_nr, signal_samples)
 
-                if progress and progress.stop:
+                if progress and not callable(progress) and progress.stop:
                     return TERMINATED
 
             if progress is not None:
@@ -1452,7 +1448,7 @@ class MDF:
 
                 idx += 1
 
-                if progress and progress.stop:
+                if progress and not callable(progress) and progress.stop:
                     return TERMINATED
 
             # if the cut interval is not found in the measurement
@@ -2536,7 +2532,7 @@ class MDF:
                     break
                 mdf._mdf.extend(cg_nr, signal_samples)
 
-                if progress and progress.stop:
+                if progress and not callable(progress) and progress.stop:
                     return TERMINATED
 
             if progress is not None:

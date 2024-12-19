@@ -17,7 +17,7 @@ import sys
 from tempfile import NamedTemporaryFile
 import time
 from traceback import format_exc
-from typing import Any, BinaryIO, Optional, overload, Union
+from typing import Any, BinaryIO, Optional, overload
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -40,7 +40,7 @@ from numpy import (
 )
 from numpy.typing import NDArray
 from pandas import DataFrame
-from typing_extensions import Literal, Required, TypedDict, Unpack
+from typing_extensions import Literal, TypedDict, Unpack
 
 from .. import tool
 from ..signal import Signal
@@ -49,7 +49,7 @@ from . import mdf_common
 from . import v2_v3_constants as v23c
 from .conversion_utils import conversion_transfer
 from .cutils import data_block_from_arrays, get_channel_raw_bytes
-from .mdf_common import BusInfo, MDF_Common
+from .mdf_common import BusInfo, CommonKwargs, MDF_Common
 from .options import get_global_option
 from .source_utils import Source
 from .utils import (
@@ -96,13 +96,11 @@ __all__ = ["MDF3"]
 
 Version = Literal["3.00", "3.10", "3.20", "3.30"]
 
-
-class _Kwargs(TypedDict, total=False):
-    original_name: Required[Union[str, os.PathLike[str]]]
-    password: str
-
-
 Group = mdf_common.Group[DataGroup, ChannelGroup, Channel]
+
+
+class _Kwargs(CommonKwargs, total=False):
+    skip_sorting: bool
 
 
 class TriggerInfoDict(TypedDict):

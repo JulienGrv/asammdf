@@ -5,13 +5,15 @@ ASAM MDF version 4 file format module
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from io import StringIO
 import logging
-from typing import Any, Generic, TypeVar
+from os import PathLike
+from pathlib import Path
+from typing import Any, Generic, Optional, TypeVar, Union
 
 from numpy.typing import NDArray
-from typing_extensions import TypedDict
+from typing_extensions import Required, TypedDict
 
 from ..types import ChannelType, DbcFileType, MDF_v2_v3_v4, StrPathType
 from . import v2_v3_blocks, v4_blocks
@@ -20,6 +22,22 @@ from .utils import DataBlockInfo, EMPTY_TUPLE, MdfException, SignalDataBlockInfo
 logger = logging.getLogger("asammdf")
 
 __all__ = ["MDF_Common"]
+
+
+class MdfKwargs(TypedDict, total=False):
+    temporary_folder: Optional[Union[str, PathLike[str]]]
+    raise_on_multiple_occurrences: bool
+    use_display_names: bool
+    fill_0_for_missing_computation_channels: bool
+    remove_source_from_channel_names: bool
+    password: Optional[str]
+    progress: Union[Callable[[int, int], None], Any]
+    callback: Union[Callable[[int, int], None], Any]
+
+
+class CommonKwargs(MdfKwargs, total=False):
+    original_name: Required[Optional[Union[str, Path]]]
+    __internal__: bool
 
 
 class CanBusInfo(TypedDict):
