@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 import logging
 from textwrap import fill
-from typing import Any, overload
+from typing import Any, Optional, overload
 
 import numpy as np
 from numpy.typing import ArrayLike, DTypeLike, NDArray
@@ -95,7 +95,7 @@ class Signal:
         source: SourceType | None = None,
         bit_count: int | None = None,
         invalidation_bits: ArrayLike | None = None,
-        encoding: str | None = None,
+        encoding: Optional[str] = None,
         group_index: int = -1,
         channel_index: int = -1,
         flags: Flags = Flags.no_flags,

@@ -249,7 +249,12 @@ CHANNEL_FILTER_SIZE = 58
 
 FMT_CHANNEL_DISPLAYNAME = "<2sH5IH32s128s4H3d2IH"
 CHANNEL_DISPLAYNAME_u = struct.Struct(FMT_CHANNEL_DISPLAYNAME).unpack
-CHANNEL_DISPLAYNAME_uf = struct.Struct(FMT_CHANNEL_DISPLAYNAME).unpack_from
+CHANNEL_DISPLAYNAME_uf: Callable[
+    [Buffer, int],
+    tuple[
+        bytes, int, int, int, int, int, int, int, bytes, bytes, int, int, int, int, float, float, float, int, int, int
+    ],
+] = struct.Struct(FMT_CHANNEL_DISPLAYNAME).unpack_from
 CHANNEL_DISPLAYNAME_p = struct.Struct(FMT_CHANNEL_DISPLAYNAME).pack
 KEYS_CHANNEL_DISPLAYNAME = (
     "id",

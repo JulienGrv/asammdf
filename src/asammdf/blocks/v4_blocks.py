@@ -14,14 +14,14 @@ from textwrap import wrap
 import time
 from traceback import format_exc
 import typing
-from typing import Any, SupportsBytes, TYPE_CHECKING
+from typing import Any, Optional, SupportsBytes, TYPE_CHECKING
 from xml.dom import minidom
 import xml.etree.ElementTree as ET
 
 import dateutil.tz
 from numexpr import evaluate
 import numpy as np
-from typing_extensions import Buffer, Unpack
+from typing_extensions import Buffer, TypedDict, Unpack
 
 from .. import tool
 from . import v4_constants as v4c
@@ -32,6 +32,7 @@ from .utils import (
     escape_xml_string,
     extract_display_names,
     extract_ev_tool,
+    FileLike,
     FLOAT64_u,
     get_text_v4,
     is_file_like,
@@ -364,6 +365,31 @@ class AttachmentBlock:
         return f"ATBLOCK(address={self.address:x}, file_name={self.file_name}, comment={self.comment})"
 
 
+class _ChannelKwargs(BlockKwargs, total=False):
+    at_map: dict[int, int]
+    tx_map: dict[int, str]
+    parsed_strings: Optional[tuple[str, dict[str, str], str]]
+    use_display_names: bool
+    cc_map: dict[bytes, ChannelConversion]
+    si_map: dict[bytes, SourceInformation]
+    channel_type: int
+    sync_type: int
+    data_type: int
+    bit_offset: int
+    byte_offset: int
+    bit_count: int
+    flags: int
+    pos_invalidation_bit: int
+    precision: int
+    min_raw_value: float
+    max_raw_value: float
+    lower_limit: float
+    upper_limit: float
+    lower_ext_limit: float
+    upper_ext_limit: float
+    attachment_addr: int
+
+
 CN = b"##CN"
 
 
@@ -501,7 +527,7 @@ class Channel:
         "upper_limit",
     )
 
-    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[_ChannelKwargs]) -> None:
         if "stream" in kwargs:
             self.address = address = kwargs["address"]
             self.dtype_fmt = self.attachment = None
@@ -941,7 +967,7 @@ class Channel:
         else:
             self.address = 0
             self.name = self.comment = self.unit = ""
-            self.display_names = {}
+            self.display_names: dict[str, str] = {}
             self.conversion = self.source = self.attachment = self.dtype_fmt = None
 
             (
@@ -2260,7 +2286,7 @@ class _ChannelConversionKwargs(BlockKwargs, total=False):
     a: float
     b: float
     default: int
-    tx_map: dict[int, str | bytes]
+    tx_map: dict[int, str]
 
 
 class ChannelConversion(_ChannelConversionBase):
@@ -5307,7 +5333,8 @@ class EventBlock(_EventBlockBase):
         return address
 
 
-class _FileIdentificationBlockKwargs(BlockKwargs, total=False):
+class _FileIdentificationBlockKwargs(TypedDict, total=False):
+    stream: FileLike
     version: str
 
 
@@ -5573,6 +5600,11 @@ class FileHistory:
         return f"FHBLOCK(time={self.time_stamp}, comment={self.comment})"
 
 
+class _HeaderBlockKwargs(TypedDict, total=False):
+    address: int
+    stream: FileLike
+
+
 class HeaderBlock:
     """
     *HeaderBlock* has the following attributes, that are also available as
@@ -5613,7 +5645,7 @@ class HeaderBlock:
 
     """
 
-    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[_HeaderBlockKwargs]) -> None:
         super().__init__()
 
         self._common_properties = {}

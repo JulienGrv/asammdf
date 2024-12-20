@@ -11,18 +11,19 @@ import sys
 from textwrap import wrap
 from traceback import format_exc
 import typing
-from typing import Any
+from typing import Any, Optional
 import xml.etree.ElementTree as ET
 
 import dateutil
 from numexpr import evaluate
 import numpy as np
-from typing_extensions import Unpack
+from typing_extensions import TypedDict, Unpack
 
 from .. import tool
 from . import v2_v3_constants as v23c
 from .utils import (
     BlockKwargs,
+    FileLike,
     get_fields,
     get_text_v3,
     MdfException,
@@ -74,6 +75,30 @@ __all__ = [
     "TextBlock",
     "TriggerBlock",
 ]
+
+
+class _ChannelKwargs(BlockKwargs, total=False):
+    parsed_strings: Optional[tuple[str, dict[str, str]]]
+    cc_map: dict[int, ChannelConversion]
+    si_map: dict[int, ChannelExtension]
+    block_len: int
+    next_ch_addr: int
+    source_addr: int
+    component_addr: int
+    comment_addr: int
+    channel_type: int
+    short_name: bytes
+    description: bytes
+    start_offset: int
+    bit_count: int
+    data_type: int
+    range_flag: int
+    min_raw_value: int
+    max_raw_value: int
+    sampling_rate: int
+    long_name_addr: int
+    display_name_addr: int
+    additional_byte_offset: int
 
 
 class Channel:
@@ -182,11 +207,11 @@ class Channel:
         "unit",
     )
 
-    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[_ChannelKwargs]) -> None:
         super().__init__()
 
         self.name = self.comment = self.unit = ""
-        self.display_names = {}
+        self.display_names: dict[str, str] = {}
         self.conversion = self.source = None
         self.dtype_fmt = None
 
@@ -2639,6 +2664,10 @@ class FileIdentificationBlock:
         return result
 
 
+class _HeaderBlockKwargs(TypedDict, total=False):
+    stream: FileLike
+
+
 class HeaderBlock:
     """HDBLOCK class
 
@@ -2687,7 +2716,7 @@ class HeaderBlock:
 
     """
 
-    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[_HeaderBlockKwargs]) -> None:
         super().__init__()
 
         self.address = 64
@@ -3044,6 +3073,10 @@ class ProgramBlock:
         return result
 
 
+class _TextBlockKwargs(BlockKwargs, total=False):
+    text: str
+
+
 class TextBlock:
     """TXBLOCK class
 
@@ -3079,7 +3112,7 @@ class TextBlock:
 
     __slots__ = ("address", "block_len", "id", "text")
 
-    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[_TextBlockKwargs]) -> None:
         super().__init__()
         try:
             stream = kwargs["stream"]

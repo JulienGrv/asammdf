@@ -22,13 +22,13 @@ from tempfile import gettempdir, mkdtemp
 from traceback import format_exc
 from types import TracebackType
 import typing
-from typing import Any, BinaryIO, Optional, overload, Union
+from typing import Any, Optional, overload, Union
 import warnings
 from warnings import warn
 import xml.etree.ElementTree as ET
 import zipfile
 
-from canmatrix import CanMatrix, Frame
+from canmatrix import CanMatrix, Frame  # type: ignore[import-untyped]
 import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
@@ -95,7 +95,7 @@ from .types import (
 )
 
 try:
-    import fsspec
+    import fsspec  # type: ignore[import-untyped]
 
     FSSPEF_AVAILABLE = True
 except:
@@ -120,17 +120,16 @@ class SearchMode(Enum):
 Version = Union[mdf_v4.Version, mdf_v3.Version, mdf_v2.Version]
 
 
-def get_measurement_timestamp_and_version(mdf: FileLike | BinaryIO) -> tuple[datetime, str]:
-    id_block = FileIdentificationBlock(address=0, stream=mdf)
+def get_measurement_timestamp_and_version(mdf: FileLike) -> tuple[datetime, str]:
+    id_block = FileIdentificationBlock(stream=mdf)
 
     version = id_block.mdf_version
-    header_class: type[Union[v4_blocks.HeaderBlock, v2_v3_blocks.HeaderBlock]]
+    header: Union[v4_blocks.HeaderBlock, v2_v3_blocks.HeaderBlock]
     if version >= 400:
-        header_class = HeaderV4
+        header = HeaderV4(address=64, stream=mdf)
     else:
-        header_class = HeaderV3
+        header = HeaderV3(stream=mdf)
 
-    header = header_class(address=64, stream=mdf)
     main_version, revision = divmod(version, 100)
     version_str = f"{main_version}.{revision}"
 
@@ -6090,11 +6089,11 @@ class MDF:
         """
 
         if version is None:
-            version = validate_version_argument(self._mdf.version, self._mdf.default_version)
+            valid_version = validate_version_argument(self._mdf.version, self._mdf.default_version)
         else:
-            version = validate_version_argument(version, self._mdf.default_version)
+            valid_version = validate_version_argument(version, self._mdf.default_version)
 
-        out = MDF(version=version)
+        out = MDF(version=valid_version)
 
         out._mdf.header.start_time = self._mdf.header.start_time
 
@@ -6116,7 +6115,7 @@ class MDF:
 
         # walk through all groups and get all channels
         for i, virtual_group in enumerate(self._mdf.virtual_groups):
-            selected_signals = self._mdf._yield_selected_signals(virtual_group, version=version)
+            selected_signals = self._mdf._yield_selected_signals(virtual_group, version=valid_version)
             sigs = typing.cast(Optional[list[Signal]], next(selected_signals, None))
             if sigs:
                 t = sigs[0].timestamps

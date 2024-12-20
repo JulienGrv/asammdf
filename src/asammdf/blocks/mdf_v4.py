@@ -21,7 +21,7 @@ import shutil
 import sys
 from tempfile import gettempdir, NamedTemporaryFile
 from traceback import format_exc
-from typing import Any, BinaryIO, Optional, overload, SupportsBytes
+from typing import Any, BinaryIO, Optional, overload, SupportsBytes, Union
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import canmatrix
@@ -321,8 +321,8 @@ class MDF4(MDF_Common):
             self.use_load_filter = True
 
         self._tempfile = NamedTemporaryFile(dir=self.temporary_folder)
-        self._mapped_file: Optional[mmap.mmap] = None
-        self._file: Optional[BinaryIO] = self._mapped_file
+        self._mapped_file: Optional[BinaryIO] = None
+        self._file: Optional[Union[FileLike, mmap.mmap]] = self._mapped_file
 
         self._read_fragment_size = get_global_option("read_fragment_size")
         self._write_fragment_size = get_global_option("write_fragment_size")
@@ -8287,7 +8287,7 @@ class MDF4(MDF_Common):
         record_offset: int = 0,
         record_count: int | None = None,
         skip_master: bool = True,
-        version: str | None = None,
+        version: Optional[str] = None,
     ) -> Iterator[list[Signal] | list[tuple[NDArray[Any], NDArray[Any]]]]:
         version = version or self.version
         virtual_channel_group = self.virtual_groups[index]

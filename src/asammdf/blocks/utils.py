@@ -20,7 +20,7 @@ from tempfile import TemporaryDirectory
 from time import perf_counter
 from traceback import format_exc
 import typing
-from typing import Any, BinaryIO, overload, Protocol
+from typing import Any, overload, Protocol, TypeVar, Union
 import xml.etree.ElementTree as ET
 
 from canmatrix.canmatrix import CanMatrix, matrix_class
@@ -146,7 +146,7 @@ __all__ = [
 
 
 class BlockKwargs(TypedDict, total=False):
-    stream: BinaryIO | Buffer
+    stream: Union[FileLike, Buffer]
     mapped: bool
     address: int
 
@@ -244,7 +244,7 @@ def matlab_compatible(name: str) -> str:
 @overload
 def get_text_v3(
     address: int,
-    stream: ReadableBufferType,
+    stream: Union[FileLike, Buffer],
     mapped: bool = ...,
     decode: Literal[True] = ...,
 ) -> str: ...
@@ -253,13 +253,15 @@ def get_text_v3(
 @overload
 def get_text_v3(
     address: int,
-    stream: ReadableBufferType,
+    stream: Union[FileLike, Buffer],
     mapped: bool = ...,
     decode: Literal[False] = ...,
 ) -> bytes: ...
 
 
-def get_text_v3(address: int, stream: ReadableBufferType, mapped: bool = False, decode: bool = True) -> str | bytes:
+def get_text_v3(
+    address: int, stream: Union[FileLike, Buffer], mapped: bool = False, decode: bool = True
+) -> str | bytes:
     """faster way to extract strings from mdf versions 2 and 3 TextBlock
 
     Parameters
@@ -310,7 +312,7 @@ def get_text_v3(address: int, stream: ReadableBufferType, mapped: bool = False, 
 @overload
 def get_text_v4(
     address: int,
-    stream: ReadableBufferType,
+    stream: Union[FileLike, Buffer],
     mapped: bool = ...,
     decode: Literal[True] = ...,
 ) -> str: ...
@@ -319,14 +321,16 @@ def get_text_v4(
 @overload
 def get_text_v4(
     address: int,
-    stream: ReadableBufferType,
+    stream: Union[FileLike, Buffer],
     mapped: bool = ...,
     *,
     decode: Literal[False],
 ) -> bytes: ...
 
 
-def get_text_v4(address: int, stream: BinaryIO | Buffer, mapped: bool = False, decode: bool = True) -> str | bytes:
+def get_text_v4(
+    address: int, stream: Union[FileLike, Buffer], mapped: bool = False, decode: bool = True
+) -> Union[str, bytes]:
     """faster way to extract strings from mdf version 4 TextBlock
 
     Parameters
@@ -965,8 +969,10 @@ Version = Literal[
     "4.20",
 ]
 
+_T = TypeVar("_T")
 
-def validate_version_argument(version: str, hint: Version) -> Version:
+
+def validate_version_argument(version: str, hint: _T) -> _T:
     """validate the version argument against the supported MDF versions. The
     default version used depends on the hint MDF major revision
 
@@ -989,7 +995,7 @@ def validate_version_argument(version: str, hint: Version) -> Version:
         message = message.format(version, SUPPORTED_VERSIONS, valid_version)
         logger.warning(message)
     else:
-        valid_version = typing.cast(Version, version)
+        valid_version = typing.cast(_T, version)
     return valid_version
 
 

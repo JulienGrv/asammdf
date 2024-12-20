@@ -81,7 +81,6 @@ class Group(Generic[_DG, _CG, _CN]):
         "read_split_count",
         "record",
         "record_size",
-        "record_size",
         "signal_data",
         "signal_types",
         "single_channel_dtype",
@@ -99,6 +98,7 @@ class Group(Generic[_DG, _CG, _CN]):
         self.channel_dependencies = []
         self.signal_data = []
         self.record = None
+        self.record_size: dict[int, int] = {}
         self.trigger = None
         self.sorted: bool
         self.string_dtypes = None

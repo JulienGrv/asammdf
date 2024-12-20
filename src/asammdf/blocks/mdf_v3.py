@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
@@ -17,7 +17,8 @@ import sys
 from tempfile import NamedTemporaryFile
 import time
 from traceback import format_exc
-from typing import Any, BinaryIO, Optional, overload
+import typing
+from typing import Any, BinaryIO, Optional, overload, Union
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -40,12 +41,12 @@ from numpy import (
 )
 from numpy.typing import NDArray
 from pandas import DataFrame
-from typing_extensions import Literal, TypedDict, Unpack
+from typing_extensions import Buffer, Literal, TypedDict, Unpack
 
 from .. import tool
 from ..signal import Signal
 from ..types import ChannelsType, CompressionType, RasterType, StrPathType
-from . import mdf_common
+from . import mdf_common, mdf_v2
 from . import v2_v3_constants as v23c
 from .conversion_utils import conversion_transfer
 from .cutils import data_block_from_arrays, get_channel_raw_bytes
@@ -94,7 +95,7 @@ logger = logging.getLogger("asammdf")
 
 __all__ = ["MDF3"]
 
-Version = Literal["3.00", "3.10", "3.20", "3.30"]
+Version = Literal[mdf_v2.Version, "3.00", "3.10", "3.20", "3.30"]
 
 Group = mdf_common.Group[DataGroup, ChannelGroup, Channel]
 
@@ -209,7 +210,6 @@ class MDF3(MDF_Common):
         self.temporary_folder = kwargs.get("temporary_folder", get_global_option("temporary_folder"))
 
         self.groups: list[Group] = []
-        self.identification = None
         self.channels_db = ChannelsDB()
         self.masters_db = {}
         self.version: str = version
@@ -219,8 +219,8 @@ class MDF3(MDF_Common):
 
         self._tempfile = NamedTemporaryFile(dir=self.temporary_folder)
         self._tempfile.write(b"\0")
-        self._mapped_file: Optional[mmap.mmap] = None
-        self._file: Optional[BinaryIO] = self._mapped_file
+        self._mapped_file: Optional[BinaryIO] = None
+        self._file: Optional[Union[FileLike, mmap.mmap]] = self._mapped_file
 
         self._remove_source_from_channel_names = kwargs.get("remove_source_from_channel_names", False)
 
@@ -260,20 +260,20 @@ class MDF3(MDF_Common):
                 self._file = name
                 self.name = self.original_name = Path("From_FileLike.mdf")
                 self._from_filelike = True
-                self._read(mapped=False, progress=progress)
+                self._read(self._file, mapped=False, progress=progress)
             else:
                 try:
                     if sys.maxsize < 2**32:
                         self.name = Path(name)
                         self._file = open(self.name, "rb")
                         self._from_filelike = False
-                        self._read(mapped=False, progress=progress)
+                        self._read(self._file, mapped=False, progress=progress)
                     else:
                         self.name = Path(name)
                         self._mapped_file = open(self.name, "rb")
                         self._file = mmap.mmap(self._mapped_file.fileno(), 0, access=mmap.ACCESS_READ)
                         self._from_filelike = False
-                        self._read(mapped=True, progress=progress)
+                        self._read(self._file, mapped=True, progress=progress)
                 except:
                     if self._file:
                         self._file.close()
@@ -683,8 +683,12 @@ class MDF3(MDF_Common):
         else:
             return vals
 
-    def _read(self, mapped: bool = False, progress=None) -> None:
-        stream = self._file
+    def _read(
+        self,
+        stream: Union[FileLike, Buffer],
+        mapped: bool = False,
+        progress: Optional[Union[Callable[[int, int], None], Any]] = None,
+    ) -> Optional[object]:
         filter_channels = self.use_load_filter
 
         cg_count, _ = count_channel_groups(stream)
@@ -733,7 +737,7 @@ class MDF3(MDF_Common):
             else:
                 trigger = None
 
-            new_groups = []
+            new_groups: list[Group] = []
             for i in range(cg_nr):
                 new_groups.append(Group(None))
                 grp = new_groups[-1]
@@ -903,7 +907,7 @@ class MDF3(MDF_Common):
             # add the key 'sorted' with the value False to use a flag;
             # this is used later if memory=False
 
-            cg_size = {}
+            cg_size: dict[int, int] = {}
             total_size = 0
 
             for grp in new_groups:
@@ -2398,7 +2402,6 @@ class MDF3(MDF_Common):
 
             self._call_back = None
             self.groups.clear()
-            self.identification = None
             self.channels_db.clear()
             self.masters_db.clear()
             self._master_channel_metadata.clear()
@@ -3442,9 +3445,9 @@ class MDF3(MDF_Common):
         dst: StrPathType,
         overwrite: bool = False,
         compression: CompressionType = 0,
-        progress=None,
+        progress: Optional[Any] = None,
         add_history_block: bool = True,
-    ) -> Path | None:
+    ) -> Union[Path, object]:
         """Save MDF to *dst*. If overwrite is *True* then the destination file
         is overwritten, otherwise the file name is appended with '.<cntr>',
         were '<cntr>' is the first counter that produces a new file name (that
@@ -3501,7 +3504,9 @@ class MDF3(MDF_Common):
             text = f"{old_history}\n{timestamp}: updated by {tool.__tool__} {tool.__version__}"
             self.header.comment = text
 
-        defined_texts, cc_map, si_map = {}, {}, {}
+        defined_texts: dict[str, int] = {}
+        cc_map: dict[bytes, int] = {}
+        si_map: dict[bytes, int] = {}
 
         if dst == self.name:
             destination = dst.with_suffix(".savetemp")
@@ -3685,13 +3690,12 @@ class MDF3(MDF_Common):
             Path.rename(destination, self.name)
 
             self.groups.clear()
-            self.identification = None
             self.channels_db.clear()
             self.masters_db.clear()
 
             self._tempfile = NamedTemporaryFile(dir=self.temporary_folder)
             self._file = open(self.name, "rb")
-            self._read()
+            self._read(self._file)
 
         return dst
 
@@ -3856,7 +3860,7 @@ class MDF3(MDF_Common):
         record_count: int | None = None,
         skip_master: bool = True,
         version: str = "4.20",
-    ) -> Iterator[list[Signal] | list[tuple[NDArray[Any], None]]]:
+    ) -> Iterator[Union[list[Signal], list[tuple[NDArray[Any], None]]]]:
         if groups is None:
             groups = self.included_channels(index)[index]
 
@@ -3864,7 +3868,7 @@ class MDF3(MDF_Common):
 
         group = self.groups[index]
 
-        encodings = [
+        encodings: list[Optional[str]] = [
             None,
         ]
 
@@ -3875,7 +3879,7 @@ class MDF3(MDF_Common):
 
             self._prepare_record(group)
 
-            signals: list[Signal] | list[tuple[NDArray[Any] | None, None]]
+            signals: Union[list[Signal], list[tuple[NDArray[Any], None]]]
             # the first fragment triggers and append that will add the
             # metadata for all channels
             if idx == 0:
@@ -3905,6 +3909,7 @@ class MDF3(MDF_Common):
 
             if version < "4.00":
                 if idx == 0:
+                    signals = typing.cast(list[Signal], signals)
                     for sig, channel_index in zip(signals, channels):
                         if sig.samples.dtype.kind == "S":
                             encodings.append(sig.encoding)
@@ -3924,16 +3929,17 @@ class MDF3(MDF_Common):
                         else:
                             encodings.append(None)
                 else:
-                    for i, (sig, encoding) in enumerate(zip(signals, encodings)):
+                    signals = typing.cast(list[tuple[NDArray[Any], None]], signals)
+                    for i, (signal_samples, encoding) in enumerate(zip(signals, encodings)):
                         if encoding:
-                            samples = sig[0]
+                            samples = signal_samples[0]
                             if encoding != "latin-1":
                                 if encoding == "utf-16-le":
                                     samples = samples.view(uint16).byteswap().view(samples.dtype)
                                     samples = encode(decode(samples, "utf-16-be"), "latin-1")
                                 else:
                                     samples = encode(decode(samples, encoding), "latin-1")
-                                signals[i] = (samples, sig[1])
+                                signals[i] = (samples, signal_samples[1])
 
             self._set_temporary_master(None)
             yield signals

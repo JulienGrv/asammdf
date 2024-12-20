@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional, Union
+
 from typing_extensions import Literal
 
 from ..types import StrPathType
@@ -17,11 +19,11 @@ Version = Literal["2.00", "2.10", "2.14"]
 class MDF2(MDF3):
     """shared implementation for mdf version 2 and 3"""
 
-    default_version: Version = "2.14"
+    default_version = "2.14"
 
     def __init__(
         self,
-        name: StrPathType | FileLike | None = None,
+        name: Optional[Union[StrPathType, FileLike]] = None,
         version: Version = default_version,
         **kwargs,
     ) -> None:
