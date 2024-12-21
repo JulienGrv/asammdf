@@ -76,7 +76,7 @@ __all__ = [
 ]
 
 
-class _ChannelKwargs(BlockKwargs, total=False):
+class ChannelKwargs(BlockKwargs, total=False):
     parsed_strings: Optional[tuple[str, dict[str, str]]]
     cc_map: dict[int, ChannelConversion]
     si_map: dict[int, ChannelExtension]
@@ -206,7 +206,7 @@ class Channel:
         "unit",
     )
 
-    def __init__(self, **kwargs: Unpack[_ChannelKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[ChannelKwargs]) -> None:
         super().__init__()
 
         self.name = self.comment = self.unit = ""

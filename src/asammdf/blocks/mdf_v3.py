@@ -79,6 +79,7 @@ from .v2_v3_blocks import (
     ChannelExtension,
     ChannelGroup,
     ChannelGroupKwargs,
+    ChannelKwargs,
     DataGroup,
     FileIdentificationBlock,
     HeaderBlock,
@@ -2239,7 +2240,7 @@ class MDF3(MDF_Common):
 
             s_type, s_size = fmt_to_datatype_v3(sig.dtype, sig.shape)
 
-            kargs = {
+            cn_kwargs: ChannelKwargs = {
                 "channel_type": v23c.CHANNEL_TYPE_VALUE,
                 "data_type": s_type,
                 "min_raw_value": 0,
@@ -2248,12 +2249,11 @@ class MDF3(MDF_Common):
                 "bit_count": s_size,
                 "additional_byte_offset": additional_byte_offset,
                 "block_len": channel_size,
-                "version": version,
             }
 
             s_size = max(s_size, 8)
 
-            channel = Channel(**kargs)
+            channel = Channel(**cn_kwargs)
             channel.name = name
             channel.source = new_source
             channel.dtype_fmt = dtype((sig.dtype, sig.shape[1:]))
