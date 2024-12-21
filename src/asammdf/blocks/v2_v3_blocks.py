@@ -213,7 +213,7 @@ class Channel:
         self.name = self.comment = self.unit = ""
         self.display_names: dict[str, str] = {}
         self.conversion = self.source = None
-        self.dtype_fmt = None
+        self.dtype_fmt: Optional[np.dtype[Any]] = None
 
         try:
             stream = kwargs["stream"]

@@ -8140,7 +8140,7 @@ class MDF4(MDF_Common):
         channels: ChannelsType | None = None,
         skip_master: bool = True,
         minimal: bool = True,
-    ) -> dict[int, dict[int, Sequence[int]]]:
+    ) -> dict[int, dict[int, list[int]]]:
         if channels is None:
             virtual_channel_group = self.virtual_groups[index]
             groups = virtual_channel_group.groups
@@ -8283,7 +8283,7 @@ class MDF4(MDF_Common):
     def _yield_selected_signals(
         self,
         index: int,
-        groups: dict[int, Sequence[int]] | None = None,
+        groups: dict[int, list[int]] | None = None,
         record_offset: int = 0,
         record_count: int | None = None,
         skip_master: bool = True,

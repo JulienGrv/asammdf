@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
@@ -39,7 +39,7 @@ from numpy import (
     unique,
     zeros,
 )
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 from pandas import DataFrame
 from typing_extensions import Buffer, Literal, TypedDict, Unpack
 
@@ -2795,7 +2795,7 @@ class MDF3(MDF_Common):
         index: int | None = None,
         raster: RasterType | None = None,
         samples_only: bool = False,
-        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = None,
+        data: tuple[bytes, int, int | None] | None = None,
         raw: bool = False,
         record_offset: int = 0,
         record_count: int | None = None,
@@ -2842,7 +2842,7 @@ class MDF3(MDF_Common):
             if *data=None* use this to select the record offset from which the
             group data should be loaded
         skip_channel_validation (False) : bool
-            skip validation of channel name, group index and channel index; defualt
+            skip validation of channel name, group index and channel index; default
             *False*. If *True*, the caller has to make sure that the *group* and *index*
             arguments are provided and are correct.
 
@@ -2928,6 +2928,8 @@ class MDF3(MDF_Common):
         """
 
         if skip_channel_validation:
+            if group is None or index is None:
+                raise ValueError("'group' or 'index' cannot be None if 'skip_channel_validation' is True")
             gp_nr, ch_nr = group, index
         else:
             gp_nr, ch_nr = self._validate_channel_selection(name, group, index)
@@ -2950,16 +2952,17 @@ class MDF3(MDF_Common):
         encoding = "latin-1"
 
         # get data group record
+        data_: Iterable[tuple[bytes, int, Optional[int]]]
         if data is None:
-            data = self._load_data(grp, record_offset=record_offset, record_count=record_count)
+            data_ = self._load_data(grp, record_offset=record_offset, record_count=record_count)
         else:
-            data = (data,)
+            data_ = (data,)
 
         # check if this is a channel array
         if dep:
             if dep.dependency_type == v23c.DEPENDENCY_TYPE_VECTOR:
                 arrays = []
-                types = []
+                types: DTypeLike = []
 
                 for dg_nr, ch_nr in dep.referenced_channels:
                     sig = self.get(
@@ -3043,7 +3046,7 @@ class MDF3(MDF_Common):
             channel_values = []
             timestamps = []
             count = 0
-            for fragment in data:
+            for fragment in data_:
                 data_bytes, _offset, _count = fragment
                 info = grp.record[ch_nr]
 
@@ -3072,7 +3075,7 @@ class MDF3(MDF_Common):
 
                         if data_type in v23c.INT_TYPES:
                             dtype_fmt = get_fmt_v3(data_type, bits, self.identification.byte_order)
-                            channel_dtype = dtype(dtype_fmt.split(")")[-1])
+                            channel_dtype: np.dtype[Any] = dtype(dtype_fmt.split(")")[-1])
 
                             if channel_dtype.byteorder == "=" and data_type in (
                                 v23c.DATA_TYPE_SIGNED_MOTOROLA,
@@ -3153,6 +3156,7 @@ class MDF3(MDF_Common):
             encoding = "latin-1"
             vals = array([e.rsplit(b"\0")[0] for e in vals.tolist()], dtype=vals.dtype)
 
+        res: Union[tuple[NDArray[Any], None], Signal]
         if samples_only:
             res = vals, None
         else:
@@ -3169,10 +3173,8 @@ class MDF3(MDF_Common):
             else:
                 comment = description
 
-            source = channel.source
-
-            if source:
-                source = Source.from_source(source)
+            if channel.source:
+                source = Source.from_source(channel.source)
 
             master_metadata = self._master_channel_metadata.get(gp_nr, None)
 
@@ -3198,7 +3200,7 @@ class MDF3(MDF_Common):
     def get_master(
         self,
         index: int,
-        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = None,
+        data: tuple[bytes, int, int | None] | None = None,
         raster: RasterType | None = None,
         record_offset: int = 0,
         record_count: int | None = None,
@@ -3267,15 +3269,16 @@ class MDF3(MDF_Common):
                 t = arange(cycles_nr, dtype=float64) * sampling_rate
             else:
                 # get data group record
+                data_: Iterable[tuple[bytes, int, Optional[int]]]
                 if data is None:
-                    data = self._load_data(group, record_offset=record_offset, record_count=record_count)
+                    data_ = self._load_data(group, record_offset=record_offset, record_count=record_count)
                     _count = record_count
                 else:
-                    data = (data,)
+                    data_ = (data,)
 
                 time_values = []
                 count = 0
-                for fragment in data:
+                for fragment in data_:
                     data_bytes, offset, _count = fragment
                     dtype_, byte_size, byte_offset, bit_offset = group.record[time_ch_nr]
 
@@ -3304,7 +3307,7 @@ class MDF3(MDF_Common):
                         time_ch.bit_count,
                         self.identification.byte_order,
                     )
-                    channel_dtype = dtype(dtype_fmt.split(")")[-1])
+                    channel_dtype: np.dtype[Any] = dtype(dtype_fmt.split(")")[-1])
 
                     if channel_dtype.byteorder == "=" and time_ch.data_type in (
                         v23c.DATA_TYPE_SIGNED_MOTOROLA,
@@ -3396,18 +3399,14 @@ class MDF3(MDF_Common):
         >>> mdf.info()
 
         """
-        info = {}
+        info: dict[str, Any] = {}
         for key in ("author", "department", "project", "subject"):
             value = self.header[key]
             info[key] = value
         info["version"] = self.version
         info["groups"] = len(self.groups)
         for i, gp in enumerate(self.groups):
-            if gp.data_location == v23c.LOCATION_ORIGINAL_FILE:
-                stream = self._file
-            elif gp.data_location == v23c.LOCATION_TEMPORARY_FILE:
-                stream = self._tempfile
-            inf = {}
+            inf: dict[str, Any] = {}
             info[f"group {i}"] = inf
             inf["cycles"] = gp.channel_group.cycles_nr
             inf["comment"] = gp.channel_group.comment
@@ -3702,7 +3701,7 @@ class MDF3(MDF_Common):
     def _sort(self, progress=None) -> None:
         if self._file is None:
             return
-        common = defaultdict(list)
+        common: defaultdict[int, list[tuple[int, int]]] = defaultdict(list)
         for i, group in enumerate(self.groups):
             if group.sorted:
                 continue
@@ -3721,7 +3720,7 @@ class MDF3(MDF_Common):
         write = self._tempfile.write
 
         for address, groups in common.items():
-            partial_records = {id_: [] for (_, id_) in groups}
+            partial_records: dict[int, list[bytes]] = {id_: [] for (_, id_) in groups}
 
             group = self.groups[groups[0][0]]
 
@@ -3753,13 +3752,15 @@ class MDF3(MDF_Common):
                     else:
                         i += rec_size
 
+            data_blocks: dict[int, list[DataBlockInfo]] = {}
+
             for rec_id, new_data in partial_records.items():
                 if new_data:
-                    new_data = b"".join(new_data)
-                    size = len(new_data)
+                    data = b"".join(new_data)
+                    size = len(data)
 
                     address = tell()
-                    write(bytes(new_data))
+                    write(bytes(data))
                     block_info = DataBlockInfo(
                         address=address,
                         block_type=0,
@@ -3767,13 +3768,13 @@ class MDF3(MDF_Common):
                         compressed_size=size,
                         param=0,
                     )
-                    partial_records[rec_id] = [block_info]
+                    data_blocks[rec_id] = [block_info]
 
             for idx, rec_id in groups:
                 group = self.groups[idx]
 
                 group.data_location = v23c.LOCATION_TEMPORARY_FILE
-                group.set_blocks_info(partial_records[rec_id])
+                group.set_blocks_info(data_blocks[rec_id])
                 group.sorted = True
 
     def included_channels(
@@ -3782,10 +3783,12 @@ class MDF3(MDF_Common):
         channels: ChannelsType | None = None,
         skip_master: bool = True,
         minimal: bool = True,
-    ) -> dict[int, dict[int, Sequence[int]]]:
+    ) -> dict[int, dict[int, list[int]]]:
         if channels is None:
+            if index is None:
+                raise ValueError("index argument must be set if channels is unset")
             group = self.groups[index]
-            gps = {}
+            gps: dict[int, list[int]] = {}
             included_channels = set(range(len(group.channels)))
             master_index = self.masters_db.get(index, None)
             if master_index is not None and len(included_channels) > 1:
@@ -3803,7 +3806,7 @@ class MDF3(MDF_Common):
 
             result = {index: gps}
         else:
-            gps = {}
+            group_sets: dict[int, set[int]] = {}
             for item in channels:
                 if isinstance(item, (list, tuple)):
                     if len(item) not in (2, 3):
@@ -3813,22 +3816,22 @@ class MDF3(MDF_Common):
                             "method"
                         )
                     else:
-                        group, idx = self._validate_channel_selection(*item)
-                        if group not in gps:
-                            gps[group] = {idx}
+                        gp_idx, idx = self._validate_channel_selection(*item)
+                        if gp_idx not in group_sets:
+                            group_sets[gp_idx] = {idx}
                         else:
-                            gps[group].add(idx)
+                            group_sets[gp_idx].add(idx)
                 else:
                     name = item
-                    group, idx = self._validate_channel_selection(name)
-                    if group not in gps:
-                        gps[group] = {idx}
+                    gp_idx, idx = self._validate_channel_selection(name)
+                    if gp_idx not in group_sets:
+                        group_sets[gp_idx] = {idx}
                     else:
-                        gps[group].add(idx)
+                        group_sets[gp_idx].add(idx)
 
             result = {}
 
-            for group_index, _channels in gps.items():
+            for group_index, _channels in group_sets.items():
                 group = self.groups[group_index]
 
                 channel_dependencies = [group.channel_dependencies[ch_nr] for ch_nr in _channels]
@@ -3855,7 +3858,7 @@ class MDF3(MDF_Common):
     def _yield_selected_signals(
         self,
         index: int,
-        groups: dict[int, Sequence[int]] | None = None,
+        groups: dict[int, list[int]] | None = None,
         record_offset: int = 0,
         record_count: int | None = None,
         skip_master: bool = True,

@@ -12,6 +12,7 @@ from os import PathLike
 from pathlib import Path
 from typing import Any, Generic, Optional, TypeVar, Union
 
+import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import Required, TypedDict
 
@@ -97,7 +98,7 @@ class Group(Generic[_DG, _CG, _CN]):
         self.channels: list[_CN] = []
         self.channel_dependencies = []
         self.signal_data = []
-        self.record = None
+        self.record: list[Optional[tuple[np.dtype[Any], int, int, int]]] = []
         self.record_size: dict[int, int] = {}
         self.trigger = None
         self.sorted: bool
