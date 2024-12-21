@@ -397,7 +397,9 @@ KEYS_TEXT_BLOCK = ("id", "block_len", "text")
 
 FMT_CONVERSION_COMMON = FMT_CONVERSION_NONE = "<2s2H2d20s2H"
 FMT_CONVERSION_COMMON_SHORT = "<H2d20s2H"
-CONVERSION_COMMON_SHORT_uf = struct.Struct(FMT_CONVERSION_COMMON_SHORT).unpack_from
+CONVERSION_COMMON_SHORT_uf: Callable[[Buffer], tuple[int, float, float, bytes, int, int]] = struct.Struct(
+    FMT_CONVERSION_COMMON_SHORT
+).unpack_from
 
 KEYS_CONVERSION_NONE = (
     "id",

@@ -1091,7 +1091,7 @@ def is_file_like(obj: object) -> TypeIs[FileLike]:
 
 class UniqueDB:
     def __init__(self) -> None:
-        self._db = {}
+        self._db: dict[str, int] = {}
 
     def get_unique_name(self, name: str) -> str:
         """returns an available unique name

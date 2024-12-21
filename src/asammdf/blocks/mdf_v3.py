@@ -39,7 +39,7 @@ from numpy import (
     unique,
     zeros,
 )
-from numpy.typing import DTypeLike, NDArray
+from numpy.typing import ArrayLike, DTypeLike, NDArray
 from pandas import DataFrame
 from typing_extensions import Literal, TypedDict, Unpack
 
@@ -74,9 +74,11 @@ from .utils import (
 from .v2_v3_blocks import (
     Channel,
     ChannelConversion,
+    ChannelConversionKwargs,
     ChannelDependency,
     ChannelExtension,
     ChannelGroup,
+    ChannelGroupKwargs,
     DataGroup,
     FileIdentificationBlock,
     HeaderBlock,
@@ -2111,7 +2113,7 @@ class MDF3(MDF_Common):
         self,
         df: DataFrame,
         comment: str = "",
-        units: dict[str, str | bytes] | None = None,
+        units: dict[str, str] | None = None,
     ) -> None:
         """
         Appends a new data group from a Pandas data frame.
@@ -2156,7 +2158,7 @@ class MDF3(MDF_Common):
         self.groups.append(gp)
 
         cycles_nr = len(timestamps)
-        fields = []
+        fields: list[ArrayLike] = []
         types: DTypeLike = []
         ch_cntr = 0
         offset = 0
@@ -2217,7 +2219,7 @@ class MDF3(MDF_Common):
 
             gp_sig_types.append(0)
 
-        for signal in df:
+        for signal in df.columns:
             sig = df[signal]
             name = signal
 
@@ -2265,18 +2267,16 @@ class MDF3(MDF_Common):
                 )
             )
 
-            unit = units.get(name, b"")
+            unit = units.get(name, "")
             if unit:
-                if hasattr(unit, "encode"):
-                    unit = unit.encode("latin-1")
                 # conversion for time channel
-                kargs = {
+                cc_kwargs: ChannelConversionKwargs = {
                     "conversion_type": v23c.CONVERSION_TYPE_NONE,
                     "unit": unit,
                     "min_phy_value": 0,
                     "max_phy_value": 0,
                 }
-                conversion = ChannelConversion(**kargs)
+                conversion = ChannelConversion(**cc_kwargs)
                 conversion.unit = unit
 
             gp_channels.append(channel)
@@ -2299,16 +2299,16 @@ class MDF3(MDF_Common):
             gp_dep.append(None)
 
         # channel group
-        kargs = {
+        cg_kwargs: ChannelGroupKwargs = {
             "cycles_nr": cycles_nr,
             "samples_byte_nr": offset // 8,
             "ch_nr": ch_cntr,
         }
         if self.version >= "3.30":
-            kargs["block_len"] = v23c.CG_POST_330_BLOCK_SIZE
+            cg_kwargs["block_len"] = v23c.CG_POST_330_BLOCK_SIZE
         else:
-            kargs["block_len"] = v23c.CG_PRE_330_BLOCK_SIZE
-        gp.channel_group = ChannelGroup(**kargs)
+            cg_kwargs["block_len"] = v23c.CG_PRE_330_BLOCK_SIZE
+        gp.channel_group = ChannelGroup(**cg_kwargs)
         gp.channel_group.comment = comment
 
         # data group

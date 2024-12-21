@@ -880,6 +880,23 @@ class _ChannelConversionBase:
     )
 
 
+class ChannelConversionKwargs(BlockKwargs, total=False):
+    raw_bytes: bytes
+    unit: str
+    conversion_type: int
+    range_flag: int
+    min_phy_value: float
+    max_phy_value: float
+    P1: float
+    P2: float
+    P3: float
+    P4: float
+    P5: float
+    P6: float
+    formula: str
+    ref_param_nr: int
+
+
 class ChannelConversion(_ChannelConversionBase):
     """CCBLOCK class
 
@@ -962,7 +979,7 @@ class ChannelConversion(_ChannelConversionBase):
 
     """
 
-    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[ChannelConversionKwargs]) -> None:
         super().__init__()
 
         self.is_user_defined = False
@@ -2150,7 +2167,7 @@ address: {hex(self.address)}
         return f"ChannelExtension (name: {self.name}, path: {self.path}, comment: {self.comment}, address: {hex(self.address)}, fields: {fields})"
 
 
-class _ChannelGroupKwargs(BlockKwargs, total=False):
+class ChannelGroupKwargs(BlockKwargs, total=False):
     block_len: int
     next_cg_addr: int
     first_ch_addr: int
@@ -2224,7 +2241,7 @@ class ChannelGroup:
         "samples_byte_nr",
     )
 
-    def __init__(self, **kwargs: Unpack[_ChannelGroupKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[ChannelGroupKwargs]) -> None:
         super().__init__()
         self.comment = ""
 

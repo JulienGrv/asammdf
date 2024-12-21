@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Generic, Optional, TypeVar, Union
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 from typing_extensions import Required, TypedDict
 
 from ..types import ChannelType, DbcFileType, MDF_v2_v3_v4, StrPathType
@@ -102,7 +102,7 @@ class Group(Generic[_DG, _CG, _CN]):
         self.record_size: dict[int, int] = {}
         self.trigger: Optional[v2_v3_blocks.TriggerBlock] = None
         self.sorted: bool
-        self.string_dtypes: list[str] = []
+        self.string_dtypes: list[DTypeLike] = []
         self.data_blocks = []
         self.signal_types: list[int]
         self.single_channel_dtype = None
