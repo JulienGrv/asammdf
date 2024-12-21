@@ -1033,6 +1033,8 @@ class MDF:
                 record_count=record_count,
                 skip_channel_validation=skip_channel_validation,
             )
+        if data and len(data) == 4:
+            raise ValueError("there is no invalidation_bytes for MDF3")
         return self._mdf.get(
             name=name,
             group=group,

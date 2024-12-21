@@ -41,7 +41,7 @@ from numpy import (
 )
 from numpy.typing import DTypeLike, NDArray
 from pandas import DataFrame
-from typing_extensions import Buffer, Literal, TypedDict, Unpack
+from typing_extensions import Literal, TypedDict, Unpack
 
 from .. import tool
 from ..signal import Signal
@@ -685,7 +685,7 @@ class MDF3(MDF_Common):
 
     def _read(
         self,
-        stream: Union[FileLike, Buffer],
+        stream: Union[FileLike, mmap.mmap],
         mapped: bool = False,
         progress: Optional[Union[Callable[[int, int], None], Any]] = None,
     ) -> Optional[object]:
@@ -2450,6 +2450,8 @@ class MDF3(MDF_Common):
             raise MdfException(message)
 
         if gp.data_location == v23c.LOCATION_ORIGINAL_FILE:
+            if self._file is None:
+                raise ValueError("self._file cannot be None")
             stream = self._file
         else:
             stream = self._tempfile
@@ -2467,7 +2469,7 @@ class MDF3(MDF_Common):
         )
 
         fields = []
-        types = []
+        types: DTypeLike = []
 
         cycles_nr = len(signals[0][0])
         string_counter = 0
@@ -2498,7 +2500,7 @@ class MDF3(MDF_Common):
                 new_gp = self.groups[index + new_group_offset]
 
                 new_fields = []
-                new_types = []
+                new_types: DTypeLike = []
 
                 names = signal.dtype.names
                 for name in names:
@@ -2604,11 +2606,6 @@ class MDF3(MDF_Common):
         gp_nr, ch_nr = self._validate_channel_selection(None, group, index)
 
         grp = self.groups[gp_nr]
-        if grp.data_location == v23c.LOCATION_ORIGINAL_FILE:
-            stream = self._file
-        else:
-            stream = self._tempfile
-
         channel = grp.channels[ch_nr]
 
         return channel.name
@@ -2622,11 +2619,6 @@ class MDF3(MDF_Common):
         gp_nr, ch_nr = self._validate_channel_selection(name, group, index)
 
         grp = self.groups[gp_nr]
-
-        if grp.data_location == v23c.LOCATION_ORIGINAL_FILE:
-            stream = self._file
-        else:
-            stream = self._tempfile
 
         channel = grp.channels[ch_nr]
         channel = deepcopy(channel)
@@ -2677,11 +2669,6 @@ class MDF3(MDF_Common):
         gp_nr, ch_nr = self._validate_channel_selection(name, group, index)
 
         grp = self.groups[gp_nr]
-        if grp.data_location == v23c.LOCATION_ORIGINAL_FILE:
-            stream = self._file
-        else:
-            stream = self._tempfile
-
         channel = grp.channels[ch_nr]
 
         if channel.conversion:
@@ -2734,11 +2721,6 @@ class MDF3(MDF_Common):
         gp_nr, ch_nr = self._validate_channel_selection(name, group, index)
 
         grp = self.groups[gp_nr]
-        if grp.data_location == v23c.LOCATION_ORIGINAL_FILE:
-            stream = self._file
-        else:
-            stream = self._tempfile
-
         channel = grp.channels[ch_nr]
 
         return channel.comment
@@ -2751,7 +2733,7 @@ class MDF3(MDF_Common):
         index: int | None = ...,
         raster: RasterType | None = ...,
         samples_only: Literal[False] = ...,
-        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
+        data: tuple[bytes, int, int | None] | None = ...,
         raw: bool = ...,
         record_offset: int = ...,
         record_count: int | None = ...,
@@ -2766,7 +2748,7 @@ class MDF3(MDF_Common):
         index: int | None = ...,
         raster: RasterType | None = ...,
         samples_only: Literal[True] = ...,
-        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
+        data: tuple[bytes, int, int | None] | None = ...,
         raw: bool = ...,
         record_offset: int = ...,
         record_count: int | None = ...,
@@ -2781,7 +2763,7 @@ class MDF3(MDF_Common):
         index: int | None = ...,
         raster: RasterType | None = ...,
         samples_only: bool = ...,
-        data: tuple[bytes, int, int | None] | tuple[bytes, int, int, bytes | None] | None = ...,
+        data: tuple[bytes, int, int | None] | None = ...,
         raw: bool = ...,
         record_offset: int = ...,
         record_count: int | None = ...,
