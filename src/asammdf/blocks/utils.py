@@ -9,6 +9,7 @@ from copy import deepcopy
 from functools import lru_cache
 import json
 import logging
+import mmap
 from pathlib import Path
 from random import randint
 import re
@@ -146,7 +147,7 @@ __all__ = [
 
 
 class BlockKwargs(TypedDict, total=False):
-    stream: Union[FileLike, Buffer]
+    stream: Union[FileLike, mmap.mmap]
     mapped: bool
     address: int
 
@@ -835,7 +836,7 @@ def as_non_byte_sized_signed_int(integer_array: NDArray[Any], bit_length: int) -
 
 
 def count_channel_groups(
-    stream: ReadableBufferType, include_channels: bool = False, mapped: bool = False
+    stream: Union[FileLike, mmap.mmap], include_channels: bool = False, mapped: bool = False
 ) -> tuple[int, int]:
     """count all channel groups as fast as possible. This is used to provide
     reliable progress information when loading a file using the GUI
@@ -1050,6 +1051,7 @@ def randomized_string(size: int) -> bytes:
 @runtime_checkable
 class FileLike(Protocol):
     def __iter__(self) -> Iterator[bytes]: ...
+    def close(self) -> None: ...
     def read(self, n: int = -1) -> bytes: ...
     def seek(self, offset: int, whence: int = 0) -> int: ...
     def tell(self) -> int: ...

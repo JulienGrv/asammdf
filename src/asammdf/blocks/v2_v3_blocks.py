@@ -17,13 +17,12 @@ import xml.etree.ElementTree as ET
 import dateutil
 from numexpr import evaluate
 import numpy as np
-from typing_extensions import TypedDict, Unpack
+from typing_extensions import Unpack
 
 from .. import tool
 from . import v2_v3_constants as v23c
 from .utils import (
     BlockKwargs,
-    FileLike,
     get_fields,
     get_text_v3,
     MdfException,
@@ -2445,6 +2444,10 @@ class DataBlock:
         return self.data
 
 
+class _DataGroupKwargs(BlockKwargs, total=False):
+    block_len: int
+
+
 class DataGroup:
     """DGBLOCK class
 
@@ -2489,7 +2492,7 @@ class DataGroup:
         "trigger_addr",
     )
 
-    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[_DataGroupKwargs]) -> None:
         super().__init__()
 
         try:
@@ -2664,10 +2667,6 @@ class FileIdentificationBlock:
         return result
 
 
-class _HeaderBlockKwargs(TypedDict, total=False):
-    stream: FileLike
-
-
 class HeaderBlock:
     """HDBLOCK class
 
@@ -2716,7 +2715,7 @@ class HeaderBlock:
 
     """
 
-    def __init__(self, **kwargs: Unpack[_HeaderBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[BlockKwargs]) -> None:
         super().__init__()
 
         self.address = 64

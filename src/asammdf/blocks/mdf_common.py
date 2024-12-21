@@ -100,10 +100,11 @@ class Group(Generic[_DG, _CG, _CN]):
         self.signal_data = []
         self.record: list[Optional[tuple[np.dtype[Any], int, int, int]]] = []
         self.record_size: dict[int, int] = {}
-        self.trigger = None
+        self.trigger: Optional[v2_v3_blocks.TriggerBlock] = None
         self.sorted: bool
-        self.string_dtypes = None
+        self.string_dtypes: list[str] = []
         self.data_blocks = []
+        self.signal_types: list[int]
         self.single_channel_dtype = None
         self.uses_ld = False
         self.read_split_count = 0

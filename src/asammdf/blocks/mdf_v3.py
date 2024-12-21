@@ -739,7 +739,15 @@ class MDF3(MDF_Common):
 
             new_groups: list[Group] = []
             for i in range(cg_nr):
-                new_groups.append(Group(None))
+                kargs = {"first_cg_addr": cg_addr, "data_block_addr": data_addr}
+                if self.version >= "3.20":
+                    kargs["block_len"] = v23c.DG_POST_320_BLOCK_SIZE
+                else:
+                    kargs["block_len"] = v23c.DG_PRE_320_BLOCK_SIZE
+                kargs["record_id_len"] = record_id_nr
+                kargs["address"] = data_group.address
+
+                new_groups.append(Group(DataGroup(**kargs)))
                 grp = new_groups[-1]
                 grp.channels = []
                 grp.trigger = trigger
@@ -749,16 +757,6 @@ class MDF3(MDF_Common):
                     grp.sorted = False
                 else:
                     grp.sorted = True
-
-                kargs = {"first_cg_addr": cg_addr, "data_block_addr": data_addr}
-                if self.version >= "3.20":
-                    kargs["block_len"] = v23c.DG_POST_320_BLOCK_SIZE
-                else:
-                    kargs["block_len"] = v23c.DG_PRE_320_BLOCK_SIZE
-                kargs["record_id_len"] = record_id_nr
-                kargs["address"] = data_group.address
-
-                grp.data_group = DataGroup(**kargs)
 
                 # read each channel group sequentially
                 if cg_addr > self.file_limit:
@@ -778,7 +776,7 @@ class MDF3(MDF_Common):
 
                     if filter_channels:
                         display_names = {}
-                        if mapped:
+                        if isinstance(stream, mmap.mmap):
                             (
                                 id_,
                                 block_len,
@@ -949,6 +947,8 @@ class MDF3(MDF_Common):
                         ref_channel_addr = dep[f"ch_{i}"]
                         channel = ch_map[ref_channel_addr]
                         dep.referenced_channels.append(channel)
+
+        return None
 
     def _filter_occurrences(
         self,
@@ -2157,7 +2157,7 @@ class MDF3(MDF_Common):
 
         cycles_nr = len(timestamps)
         fields = []
-        types = []
+        types: DTypeLike = []
         ch_cntr = 0
         offset = 0
         field_names = UniqueDB()
@@ -2376,7 +2376,7 @@ class MDF3(MDF_Common):
             self._parent = None
             if self._tempfile is not None:
                 self._tempfile.close()
-            if self._file is not None and not self._from_filelike:
+            if is_file_like(self._file):
                 self._file.close()
 
             if self._mapped_file is not None:
@@ -3362,7 +3362,7 @@ class MDF3(MDF_Common):
             trigger = gp.trigger
             if trigger:
                 for j in range(trigger["trigger_events_nr"]):
-                    trigger_info = {
+                    trigger_info: TriggerInfoDict = {
                         "comment": trigger.comment,
                         "index": j,
                         "group": i,
