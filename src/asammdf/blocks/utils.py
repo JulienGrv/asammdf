@@ -2,9 +2,7 @@
 asammdf utility functions and classes
 """
 
-from __future__ import annotations
-
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from copy import deepcopy
 from functools import lru_cache
 import json
@@ -102,21 +100,21 @@ COLORS = [
 ]
 COLORS_COUNT = len(COLORS)
 
-UINT8_u = Struct("<B").unpack
-UINT16_u = Struct("<H").unpack
+UINT8_u: Callable[[Buffer], tuple[int]] = Struct("<B").unpack
+UINT16_u: Callable[[Buffer], tuple[int]] = Struct("<H").unpack
 UINT32_p = Struct("<I").pack
-UINT32_u = Struct("<I").unpack
-UINT64_u = Struct("<Q").unpack
-UINT8_uf = Struct("<B").unpack_from
-UINT16_uf = Struct("<H").unpack_from
-UINT32_uf = Struct("<I").unpack_from
-UINT64_uf = Struct("<Q").unpack_from
-FLOAT64_u = Struct("<d").unpack
-FLOAT64_uf = Struct("<d").unpack_from
-TWO_UINT64_u = Struct("<2Q").unpack
-TWO_UINT64_uf = Struct("<2Q").unpack_from
-BLK_COMMON_uf = Struct("<4s4xQ").unpack_from
-BLK_COMMON_u = Struct("<4s4xQ8x").unpack
+UINT32_u: Callable[[Buffer], tuple[int]] = Struct("<I").unpack
+UINT64_u: Callable[[Buffer], tuple[int]] = Struct("<Q").unpack
+UINT8_uf: Callable[[Buffer, int], tuple[int]] = Struct("<B").unpack_from
+UINT16_uf: Callable[[Buffer, int], tuple[int]] = Struct("<H").unpack_from
+UINT32_uf: Callable[[Buffer, int], tuple[int]] = Struct("<I").unpack_from
+UINT64_uf: Callable[[Buffer, int], tuple[int]] = Struct("<Q").unpack_from
+FLOAT64_u: Callable[[Buffer], tuple[float]] = Struct("<d").unpack
+FLOAT64_uf: Callable[[Buffer, int], tuple[float]] = Struct("<d").unpack_from
+TWO_UINT64_u: Callable[[Buffer], tuple[int, int]] = Struct("<2Q").unpack
+TWO_UINT64_uf: Callable[[Buffer, int], tuple[int, int]] = Struct("<2Q").unpack_from
+BLK_COMMON_uf: Callable[[Buffer, int], tuple[bytes, int]] = Struct("<4s4xQ").unpack_from
+BLK_COMMON_u: Callable[[Buffer], tuple[bytes, int]] = Struct("<4s4xQ8x").unpack
 
 EMPTY_TUPLE = ()
 
@@ -147,7 +145,7 @@ __all__ = [
 
 
 class BlockKwargs(TypedDict, total=False):
-    stream: Union[FileLike, mmap.mmap]
+    stream: Union["FileLike", mmap.mmap]
     mapped: bool
     address: int
 
@@ -245,7 +243,7 @@ def matlab_compatible(name: str) -> str:
 @overload
 def get_text_v3(
     address: int,
-    stream: Union[FileLike, Buffer],
+    stream: Union["FileLike", Buffer],
     mapped: bool = ...,
     decode: Literal[True] = ...,
 ) -> str: ...
@@ -254,14 +252,14 @@ def get_text_v3(
 @overload
 def get_text_v3(
     address: int,
-    stream: Union[FileLike, Buffer],
+    stream: Union["FileLike", Buffer],
     mapped: bool = ...,
     decode: Literal[False] = ...,
 ) -> bytes: ...
 
 
 def get_text_v3(
-    address: int, stream: Union[FileLike, Buffer], mapped: bool = False, decode: bool = True
+    address: int, stream: Union["FileLike", Buffer], mapped: bool = False, decode: bool = True
 ) -> str | bytes:
     """faster way to extract strings from mdf versions 2 and 3 TextBlock
 
@@ -313,7 +311,7 @@ def get_text_v3(
 @overload
 def get_text_v4(
     address: int,
-    stream: Union[FileLike, Buffer],
+    stream: Union["FileLike", mmap.mmap],
     mapped: bool = ...,
     decode: Literal[True] = ...,
 ) -> str: ...
@@ -322,7 +320,7 @@ def get_text_v4(
 @overload
 def get_text_v4(
     address: int,
-    stream: Union[FileLike, Buffer],
+    stream: Union["FileLike", mmap.mmap],
     mapped: bool = ...,
     *,
     decode: Literal[False],
@@ -330,7 +328,7 @@ def get_text_v4(
 
 
 def get_text_v4(
-    address: int, stream: Union[FileLike, Buffer], mapped: bool = False, decode: bool = True
+    address: int, stream: Union["FileLike", mmap.mmap], mapped: bool = False, decode: bool = True
 ) -> Union[str, bytes]:
     """faster way to extract strings from mdf version 4 TextBlock
 
@@ -351,31 +349,29 @@ def get_text_v4(
     if address == 0:
         return "" if decode else b""
 
-    if mapped:
+    if isinstance(stream, mmap.mmap):
         block_id, size = BLK_COMMON_uf(stream, address)
         if block_id not in (b"##TX", b"##MD"):
             return "" if decode else b""
-        text_bytes = stream[address + 24 : address + size].split(b"\0", 1)[0].strip(b" \r\t\n")
+        text = stream[address + 24 : address + size].split(b"\0", 1)[0].strip(b" \r\t\n")
     else:
         stream.seek(address)
         block_id, size = BLK_COMMON_u(stream.read(24))
         if block_id not in (b"##TX", b"##MD"):
             return "" if decode else b""
-        text_bytes = stream.read(size - 24).split(b"\0", 1)[0].strip(b" \r\t\n")
+        text = stream.read(size - 24).split(b"\0", 1)[0].strip(b" \r\t\n")
 
     if decode:
         try:
-            text = text_bytes.decode("utf-8")
+            return text.decode("utf-8")
         except UnicodeDecodeError:
             try:
-                encoding = detect(text_bytes)["encoding"]
-                text = text_bytes.decode(encoding, "ignore")
+                encoding = detect(text)["encoding"]
+                return text.decode(encoding, "ignore")
             except:
-                text = "<!text_decode_error>"
+                return "<!text_decode_error>"
     else:
-        text = text_bytes
-
-    return text
+        return text
 
 
 def sanitize_xml(text: str) -> str:
@@ -836,7 +832,7 @@ def as_non_byte_sized_signed_int(integer_array: NDArray[Any], bit_length: int) -
 
 
 def count_channel_groups(
-    stream: Union[FileLike, mmap.mmap], include_channels: bool = False, mapped: bool = False
+    stream: Union["FileLike", mmap.mmap], include_channels: bool = False, mapped: bool = False
 ) -> tuple[int, int]:
     """count all channel groups as fast as possible. This is used to provide
     reliable progress information when loading a file using the GUI
