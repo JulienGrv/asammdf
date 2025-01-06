@@ -19,7 +19,7 @@ from tempfile import TemporaryDirectory
 from time import perf_counter
 from traceback import format_exc
 import typing
-from typing import Any, overload, Protocol, TypeVar, Union
+from typing import Any, Optional, overload, Protocol, TypeVar, Union
 import xml.etree.ElementTree as ET
 
 from canmatrix.canmatrix import CanMatrix, matrix_class
@@ -66,7 +66,7 @@ except:
     except:
 
         class DetectDict(TypedDict):
-            encoding: str | None
+            encoding: Optional[str]
 
         def detect(text: bytes) -> DetectDict:
             for encoding in ("utf-8", "latin-1", "cp1250", "cp1252"):
@@ -142,13 +142,6 @@ __all__ = [
     "matlab_compatible",
     "validate_version_argument",
 ]
-
-
-class BlockKwargs(TypedDict, total=False):
-    stream: Union["FileLike", mmap.mmap]
-    mapped: bool
-    address: int
-
 
 CHANNEL_COUNT = (1000, 2000, 10000, 20000)
 _channel_count = arange(0, 20000, 1000, dtype="<u4")
@@ -260,7 +253,7 @@ def get_text_v3(
 
 def get_text_v3(
     address: int, stream: Union["FileLike", Buffer], mapped: bool = False, decode: bool = True
-) -> str | bytes:
+) -> Union[str, bytes]:
     """faster way to extract strings from mdf versions 2 and 3 TextBlock
 
     Parameters
@@ -1085,6 +1078,16 @@ def is_file_like(obj: object) -> TypeIs[FileLike]:
     return isinstance(obj, FileLike)
 
 
+class BlockKwargs(TypedDict, total=False):
+    stream: Union[FileLike, mmap.mmap]
+    mapped: bool
+    address: int
+
+
+def stream_is_mmap(stream: Union[FileLike, mmap.mmap], mapped: bool) -> TypeIs[mmap.mmap]:
+    return mapped
+
+
 class UniqueDB:
     def __init__(self) -> None:
         self._db: dict[str, int] = {}
@@ -1165,7 +1168,7 @@ def cut_video_stream(stream: bytes, start: float, end: float, fmt: str) -> bytes
     return result
 
 
-def get_video_stream_duration(stream: bytes) -> float | None:
+def get_video_stream_duration(stream: bytes) -> Optional[float]:
     with TemporaryDirectory() as tmp:
         in_file = Path(tmp) / "in"
         in_file.write_bytes(stream)
@@ -1232,7 +1235,7 @@ def components(
     channel_name: str,
     unique_names: UniqueDB,
     prefix: str = "",
-    master: pd.Index[float] | pd.Index[int] | None = None,
+    master: Optional[Union[pd.Index[float], pd.Index[int]]] = None,
     only_basenames: bool = False,
 ) -> Iterator[tuple[str, Series[Any]]]:
     """yield pandas Series and unique name based on the ndarray object
@@ -1372,7 +1375,7 @@ class DataBlockInfo:
         compressed_size: int,
         param: int,
         invalidation_block=None,
-        block_limit: int | None = None,
+        block_limit: Optional[int] = None,
     ) -> None:
         self.address = address
         self.block_type = block_type
@@ -1405,7 +1408,7 @@ class InvalidationBlockInfo(DataBlockInfo):
         compressed_size: int,
         param: int,
         all_valid: bool = False,
-        block_limit: int | None = None,
+        block_limit: Optional[int] = None,
     ) -> None:
         super().__init__(address, block_type, original_size, compressed_size, param, block_limit)
         self.all_valid = all_valid
@@ -1438,7 +1441,7 @@ class SignalDataBlockInfo:
         original_size: int,
         block_type: int = v4c.DT_BLOCK,
         param: int = 0,
-        compressed_size: int | None = None,
+        compressed_size: Optional[int] = None,
         location: int = v4c.LOCATION_ORIGINAL_FILE,
     ) -> None:
         self.address = address
@@ -1580,7 +1583,7 @@ def csv_int2hex(val: pd.Series[bool]) -> str:
 csv_int2hex = np.vectorize(csv_int2hex, otypes=[str])
 
 
-def csv_bytearray2hex(val: NDArray[Any], size: int | None = None) -> str:
+def csv_bytearray2hex(val: NDArray[Any], size: Optional[int] = None) -> str:
     """format CAN payload as hex strings
 
     b'\xa2\xc3\x08' -> A2 C3 08
@@ -1615,7 +1618,7 @@ def pandas_query_compatible(name: str) -> str:
     return name
 
 
-def load_can_database(path: StrPathType, contents: bytes | str | None = None, **kwargs) -> CanMatrix | None:
+def load_can_database(path: StrPathType, contents: Optional[Union[bytes, str]] = None, **kwargs) -> Optional[CanMatrix]:
     """
 
 

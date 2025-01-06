@@ -5,7 +5,6 @@ classes that implement the blocks for MDF version 4
 from datetime import datetime, timedelta, timezone
 from hashlib import md5
 import logging
-import mmap
 from pathlib import Path
 import re
 from struct import pack, unpack, unpack_from
@@ -23,6 +22,7 @@ import numpy as np
 from typing_extensions import TypedDict, Unpack
 
 from .. import tool
+from . import utils
 from . import v4_constants as v4c
 from .cutils import bytes_dtype_size
 from .utils import (
@@ -180,7 +180,7 @@ class AttachmentBlock:
             stream = kwargs["stream"]
             mapped = kwargs.get("mapped", False) or not is_file_like(stream)
 
-            if isinstance(stream, mmap.mmap):
+            if utils.stream_is_mmap(stream, mapped):
                 (
                     self.id,
                     self.reserved0,
@@ -542,7 +542,7 @@ class Channel:
             stream = kwargs["stream"]
             mapped = kwargs["mapped"]
 
-            if isinstance(stream, mmap.mmap):
+            if utils.stream_is_mmap(stream, mapped):
                 (self.id, self.reserved0, self.block_len, self.links_nr) = COMMON_uf(stream, address)
 
                 if self.id != b"##CN":
@@ -1487,7 +1487,9 @@ class ChannelArrayBlock(_ChannelArrayBlockBase):
 
             stream = kwargs["stream"]
 
-            if isinstance(stream, mmap.mmap):
+            mapped = kwargs.get("mapped", False) or not is_file_like(stream)
+
+            if utils.stream_is_mmap(stream, mapped):
                 (self.id, self.reserved0, self.block_len, self.links_nr) = COMMON_uf(stream, address)
 
                 if self.id != b"##CA":
@@ -2104,7 +2106,7 @@ class ChannelGroup:
         self,
         address: int,
         blocks: list[SupportsBytes],
-        defined_texts: dict[str | bytes, int],
+        defined_texts: dict[Union[str, bytes], int],
         si_map: dict[bytes, int],
     ) -> int:
         text = self.acq_name
@@ -4501,7 +4503,7 @@ class DataBlock:
             stream = kwargs["stream"]
             mapped = kwargs.get("mapped", False) or not is_file_like(stream)
 
-            if isinstance(stream, mmap.mmap):
+            if utils.stream_is_mmap(stream, mapped):
                 (self.id, self.reserved0, self.block_len, self.links_nr) = COMMON_uf(stream, address)
 
                 if self.id not in (b"##DT", b"##RD", b"##SD", b"##DV", b"##DI"):
@@ -4811,7 +4813,7 @@ class DataGroup:
             stream = kwargs["stream"]
             mapped = kwargs.get("mapped", False) or not is_file_like(stream)
 
-            if isinstance(stream, mmap.mmap):
+            if utils.stream_is_mmap(stream, mapped):
                 (
                     self.id,
                     self.reserved0,
@@ -4986,7 +4988,7 @@ class DataList(_DataListBase):
             stream = kwargs["stream"]
             mapped = kwargs.get("mapped", False) or not is_file_like(stream)
 
-            if isinstance(stream, mmap.mmap):
+            if utils.stream_is_mmap(stream, mapped):
                 (self.id, self.reserved0, self.block_len, self.links_nr) = COMMON_uf(stream, address)
 
                 if self.id != b"##DL":
@@ -5595,7 +5597,7 @@ class FileHistory:
             localtz = dateutil.tz.tzlocal()
             self.time_stamp = datetime.fromtimestamp(time.time(), tz=localtz)
 
-    def to_blocks(self, address: int, blocks: list[SupportsBytes], defined_texts: dict[str | bytes, int]) -> int:
+    def to_blocks(self, address: int, blocks: list[SupportsBytes], defined_texts: dict[Union[str, bytes], int]) -> int:
         text = self.comment
         if text:
             if text in defined_texts:
@@ -6224,7 +6226,7 @@ class ListData(_ListDataBase):
             stream = kwargs["stream"]
             mapped = kwargs.get("mapped", False) or not is_file_like(stream)
 
-            if isinstance(stream, mmap.mmap):
+            if utils.stream_is_mmap(stream, mapped):
                 (self.id, self.reserved0, self.block_len, self.links_nr) = COMMON_uf(stream, address)
 
                 if self.id != b"##LD":
@@ -6752,7 +6754,9 @@ class TextBlock:
             stream = kwargs["stream"]
             self.address = address = kwargs["address"]
 
-            if isinstance(stream, mmap.mmap):
+            mapped = kwargs.get("mapped", False) or not is_file_like(stream)
+
+            if utils.stream_is_mmap(stream, mapped):
                 (self.id, self.reserved0, self.block_len, self.links_nr) = COMMON_uf(stream, address)
 
                 size = self.block_len - COMMON_SIZE
