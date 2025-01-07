@@ -4,15 +4,11 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
-from typing_extensions import Literal
-
 from ..types import StrPathType
-from .mdf_v3 import MDF3
+from .mdf_v3 import MDF3, Version
 from .utils import FileLike, MdfException, validate_version_argument
 
 __all__ = ["MDF2"]
-
-Version = Literal["2.00", "2.10", "2.14"]
 
 
 # MDF versions 2 and 3 share the same implementation

@@ -49,7 +49,7 @@ dependencies = [
 decode = ["faust-cchardet==2.1.19", "chardet"]
 export = ["pyarrow", "h5py", "hdf5storage>=0.1.19", "python-snappy"]
 export_matlab_v5 = ["scipy"]
-gui = ["natsort", "PySide6", "pyqtgraph", "pyqtlet2", "packaging", "QtPy"]
+gui = ["natsort", "PySide6", "pyqtgraph", "pyqtlet2[PySide6]", "packaging"]
 encryption = ["cryptography", "keyring"]
 symbolic_math = ["sympy"]
 filesystem = ["fsspec"]
@@ -96,6 +96,24 @@ files = "."
 exclude = ["build/", "dist/", "doc/_build/", "src/asammdf/gui/"]
 python_version = "3.9"
 plugins = ["numpy.typing.mypy_plugin"]
+
+[[tool.mypy.overrides]]
+module = [
+    "canmatrix.*",
+    "cmerg.*",
+    "fsspec.*",
+    "h5py",
+    "hdf5storage.*",
+    "mdfreader.*",
+    "mfile.*",
+    "numexpr.*",
+    "pyqtgraph.*",
+    "pyqtlet2.*",
+    "snappy.*",
+    "sympy.*",
+    "xmlrunner.*",
+]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "asammdf.gui.*"

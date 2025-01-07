@@ -28,7 +28,7 @@ from warnings import warn
 import xml.etree.ElementTree as ET
 import zipfile
 
-from canmatrix import CanMatrix, Frame  # type: ignore[import-untyped]
+from canmatrix import CanMatrix, Frame
 import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
@@ -95,7 +95,7 @@ from .types import (
 )
 
 try:
-    import fsspec  # type: ignore[import-untyped]
+    import fsspec
 
     FSSPEF_AVAILABLE = True
 except:
@@ -1651,7 +1651,7 @@ class MDF:
 
         if compression == "snappy":
             try:
-                import snappy  # type: ignore[import-untyped] # noqa: F401
+                import snappy  # noqa: F401
             except ImportError:
                 logger.warning("snappy compressor is not installed; compression will be set to GZIP")
                 compression = "gzip"
@@ -1669,7 +1669,7 @@ class MDF:
 
         elif fmt == "hdf5":
             try:
-                from h5py import File as HDF5  # type: ignore[import-untyped]
+                from h5py import File as HDF5
             except ImportError:
                 logger.warning("h5py not found; export to HDF5 is unavailable")
                 return None
@@ -1677,7 +1677,7 @@ class MDF:
         elif fmt == "mat":
             if format == "7.3":
                 try:
-                    from hdf5storage import savemat  # type: ignore[import-untyped]
+                    from hdf5storage import savemat
                 except ImportError:
                     logger.warning("hdf5storage not found; export to mat v7.3 is unavailable")
                     return None

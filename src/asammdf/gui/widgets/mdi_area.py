@@ -16,7 +16,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from natsort import natsorted
 import numpy as np
 import pandas as pd
-from pyqtgraph import functions as fn  # type: ignore[import-untyped]
+from pyqtgraph import functions as fn
 from PySide6 import QtCore, QtGui, QtWidgets
 
 import asammdf.mdf as mdf_module

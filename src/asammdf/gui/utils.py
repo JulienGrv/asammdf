@@ -23,7 +23,7 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
-from pyqtgraph import functions as fn  # type: ignore[import-untyped]
+from pyqtgraph import functions as fn
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..blocks.options import FloatInterpolation, IntegerInterpolation

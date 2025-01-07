@@ -52,7 +52,7 @@ except ImportError:
     COMPRESSION_LEVEL = 1
 
 try:
-    from sympy import lambdify, symbols  # type: ignore[import-untyped]
+    from sympy import lambdify, symbols
 
 except:
     lambdify, symbols = None, None
@@ -6669,7 +6669,7 @@ comment: {self.comment}
         return address
 
     @classmethod
-    def from_common_source(cls, source: Source) -> "SourceInformation":
+    def from_common_source(cls, source: "Source") -> "SourceInformation":
         obj = cls()
         obj.name = source.name
         obj.path = source.path
@@ -6752,9 +6752,8 @@ class TextBlock:
 
         elif "stream" in kwargs:
             stream = kwargs["stream"]
-            self.address = address = kwargs["address"]
-
             mapped = kwargs.get("mapped", False) or not is_file_like(stream)
+            self.address = address = kwargs["address"]
 
             if utils.stream_is_mmap(stream, mapped):
                 (self.id, self.reserved0, self.block_len, self.links_nr) = COMMON_uf(stream, address)

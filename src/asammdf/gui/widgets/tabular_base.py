@@ -34,7 +34,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-import pyqtgraph.functions as fn  # type: ignore[import-untyped]
+import pyqtgraph.functions as fn
 from PySide6 import QtCore, QtGui, QtWidgets
 
 import asammdf.mdf as mdf_module

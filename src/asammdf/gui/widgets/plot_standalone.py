@@ -2,7 +2,7 @@ from functools import partial
 import logging
 import webbrowser
 
-import pyqtgraph as pg  # type: ignore[import-untyped]
+import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .plot import Plot, PlotSignal

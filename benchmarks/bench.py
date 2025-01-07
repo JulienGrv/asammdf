@@ -11,7 +11,7 @@ import platform
 import sys
 import traceback
 
-from mdfreader import __version__ as mdfreader_version  # type: ignore[import-untyped]
+from mdfreader import __version__ as mdfreader_version
 from mdfreader import Mdf as MDFreader
 import numpy as np
 import psutil

@@ -46,7 +46,7 @@ from typing_extensions import Literal, TypedDict, Unpack
 from .. import tool
 from ..signal import Signal
 from ..types import ChannelsType, CompressionType, RasterType, StrPathType
-from . import mdf_common, mdf_v2
+from . import mdf_common
 from . import v2_v3_constants as v23c
 from .conversion_utils import conversion_transfer
 from .cutils import data_block_from_arrays, get_channel_raw_bytes
@@ -98,8 +98,8 @@ logger = logging.getLogger("asammdf")
 
 __all__ = ["MDF3"]
 
-Version = Literal[mdf_v2.Version, "3.00", "3.10", "3.20", "3.30"]
-
+Mdf2Version = Literal["2.00", "2.10", "2.14"]
+Version = Literal[Mdf2Version, "3.00", "3.10", "3.20", "3.30"]
 Group = mdf_common.Group[DataGroup, ChannelGroup, Channel]
 
 

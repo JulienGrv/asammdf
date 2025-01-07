@@ -20,7 +20,7 @@ import time
 import unittest
 from unittest import mock
 
-import pyqtgraph  # type: ignore[import-untyped]
+import pyqtgraph
 from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
 from asammdf import mdf

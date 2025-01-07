@@ -93,7 +93,7 @@ class BatchWidget(Ui_batch_widget, QtWidgets.QWidget):
         formats = ["MDF", "ASC", "CSV"]
 
         try:
-            from hdf5storage import savemat  # type: ignore[import-untyped]
+            from hdf5storage import savemat
 
             formats.append("MAT")
         except ImportError:
@@ -105,7 +105,7 @@ class BatchWidget(Ui_batch_widget, QtWidgets.QWidget):
                 pass
 
         try:
-            from h5py import File as HDF5  # type: ignore[import-untyped] # noqa: F401
+            from h5py import File as HDF5  # noqa: F401
 
             formats.append("HDF5")
         except ImportError:
@@ -882,10 +882,10 @@ class BatchWidget(Ui_batch_widget, QtWidgets.QWidget):
 
         if suffix in (".erg", ".bsig", ".dl3", ".tdms"):
             try:
-                from mfile import BSIG, DL3, ERG, TDMS  # type: ignore[import-not-found]
+                from mfile import BSIG, DL3, ERG, TDMS
             except ImportError:
                 print(format_exc())
-                from cmerg import BSIG, ERG  # type: ignore[import-untyped]
+                from cmerg import BSIG, ERG
 
             if suffix == ".erg":
                 cls = ERG

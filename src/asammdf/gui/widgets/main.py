@@ -8,7 +8,7 @@ from textwrap import wrap
 import webbrowser
 
 from natsort import natsorted
-import pyqtgraph as pg  # type: ignore[import-untyped]
+import pyqtgraph as pg
 from PySide6 import __version__ as pyside6_version
 from PySide6 import QtCore, QtGui, QtWidgets
 

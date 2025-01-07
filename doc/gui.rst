@@ -33,8 +33,11 @@ After you pip install asammdf using ``pip install asammdf[gui]`` there will be a
 
 The following dependencies are required by the GUI
 
-* PyQt5
+* natsort
+* packaging
 * pyqtgraph
+* pyqtlet2
+* PySide6
 
 
 General shortcuts
@@ -59,10 +62,10 @@ File
 ----
 The first menu command is *Open*. Depending on the mode this allows to open files individually or for batch processing.
 
-The second menu command is *Open folder*. If this is selected then, starting with the selected root folder, all sub-folders are 
-searched recursively for MDF files. 
+The second menu command is *Open folder*. If this is selected then, starting with the selected root folder, all sub-folders are
+searched recursively for MDF files.
 
-Once a file has been opened, the user can load or save a display configuration using the *Open configuration* and *Save configuration* 
+Once a file has been opened, the user can load or save a display configuration using the *Open configuration* and *Save configuration*
 menu items.
 
 
@@ -70,7 +73,7 @@ Mode
 ----
 
 * *Single files* : files are opened individually
-* *Batch processing* : allows processing multiple files 
+* *Batch processing* : allows processing multiple files
 * *Comparison* : show channels from all the opened files
 
 
@@ -78,55 +81,55 @@ Settings
 --------
 
 The following settings are available
-      
+
 * **Sub-windows**: controls if multiple subplots will be created when the plot button is pressed
 
-      * ``Disabled``: a single plot is used that is overwritten 
-      * ``Enabled``: a new subplot is added 
-      
+      * ``Disabled``: a single plot is used that is overwritten
+      * ``Enabled``: a new subplot is added
+
 * **Link sub-windows X-axis**: controls the subplots are linked on the X axis (zooming will affect all sub-windows)
 
       * ``Disabled``
       * ``Enabled``
-	  
+
 * **Ignore value2text conversions**: do not apply the value to text conversions
 
       * ``Disabled``
       * ``Enabled``
-      
+
 * **Plot background**: switch plot background color (does not affect existing plots)
 
       * ``Black``
       * ``White``
-	  
+
 * **Plot X axis**: select how the X axis will be displayed
 
-      * ``seconds`` 
+      * ``seconds``
 	  * ``time`` : values will be formatted as hours, minutes and seconds
       * ``date`` : the values will use the measurement start datetime
-      
+
 * **Theme**: switch application theme
 
       * ``Dark``
       * ``Light``
-      
+
 * **Step mode**: controls how the signal samples are interconnected visually in the Plot
-      
+
 * **Integer interpolation**: selects the way integer channels are interpolated
 
       * ``0 - repeat previous sample``
       * ``1 - linear interpolation``
       * ``2 - hybrid interpolation``
-      
+
 * **Float interpolation**: selects the way float channels are interpolated
 
       * ``0 - repeat previous sample``
       * ``1 - linear interpolation``
-      
-      
+
+
 The settings are saved and restored each time the GUI is started.
 
-      
+
 Plot
 ----
 
@@ -165,7 +168,7 @@ Ctrl+R       Edit color ranges      Opens a dialog to edit the channel or channe
 Ctrl+G       Edit Y axis scaling    Opens a dialog to visually edit the Y axis ranges acoording to the expected signal values [7]_
 Ctrl+S       Save plot channels     Save channels from current active subplot in a new MF4 file
 Ctrl+Shift+S Save all channels      Save all channels from all sub-windows in a new MF4 file
-Shift+C      Cascade sub-windows    Cascade the sub plots    
+Shift+C      Cascade sub-windows    Cascade the sub plots
 Shift+Alt+F  Toggle frames          Will toggle the sub plots MDI window frames
 Shift+L      Toggle channel list    Will toggle the channel tree for the current opened file
 Shift+T      Tile sub-windows       Tiles sub-windows in a grid
@@ -196,11 +199,11 @@ Layout elements
 6. Numeric window
 7. Plot window
 8. Tabular window
-9. File operations  
+9. File operations
 
 1. Opened files tabs
 ^^^^^^^^^^^^^^^^^^^^
-In the single files mode, you can open multiple files in parallel. The tab names have the title set to the short file name, and the complete file path can be seen as 
+In the single files mode, you can open multiple files in parallel. The tab names have the title set to the short file name, and the complete file path can be seen as
 the tab tool-tip.
 
 There is no restriction, so the same file can be opened several times.
@@ -215,12 +218,12 @@ The channel tree can be displayed in three ways
 
 3. Complete channels tree
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-This tree contains all the channels found in the measurement. 
+This tree contains all the channels found in the measurement.
 
 Double clicking a channel name will display a pop-up window with the channel information (CNBLOCK, CCBLOCK and SIBLOCK/CEBLOCK)
 
 .. image:: images/channel_info.png
-   
+
 Only the channels that are checked in the channels tree will be selected for plotting when the *Create window* button is pressed.
 Checking or unchecking channels will not affect the current plot or sub-windows.
 
@@ -232,22 +235,22 @@ From left to right the buttons have the following functionality
 * **Save configuration**: saves all sub-windows (channels, colors, common axis and enable state) and channel tree
 * **Select all channels**: checks all channels in the channels tree
 * **Reset selection**: unchecks all channels in the channels tree
-* **Advanced search & select**: will open an advanced search dialog 
+* **Advanced search & select**: will open an advanced search dialog
 
       * the dialog can use wildcard and regex patterns
       * multiple channels can be selected, and thus checked in the channels tree
-      * in the "Pattern based window" tab the user can define a pattern that will be used to filter out the channels from the 
+      * in the "Pattern based window" tab the user can define a pattern that will be used to filter out the channels from the
         measurement file, and as a second filtering step some condition can be used based on the channels values. This information
         will be saved in the window configuration. The pattern based windows can be easily recognized by the title bar icon
       * the keyboard shortcut ``Ctrl+F`` can also be used to bring up the search dialog
-     
+
     .. image:: images/advanced_search.png
- 
-* **Create window**: generates a new window (Numeric, Plot, Tabular, GPS, CAN/LIN/FlexRay Bus Trace) based on the current checked channels from the channels tree. 
-  If sub-windows are disabled in the settings then the current window is replaced by the new plot. 
-  If sub-windows are enabled then a new sub-plot will be added, and the already existing sub-windows will not be affected. 
+
+* **Create window**: generates a new window (Numeric, Plot, Tabular, GPS, CAN/LIN/FlexRay Bus Trace) based on the current checked channels from the channels tree.
+  If sub-windows are disabled in the settings then the current window is replaced by the new plot.
+  If sub-windows are enabled then a new sub-plot will be added, and the already existing sub-windows will not be affected.
   The same channel can be used in multiple sub-windows.
-  
+
 
 
 5. Windows area
@@ -272,7 +275,7 @@ a numeric window to see the channel values at certain time stamps, and to search
 8. target value: search target value
 9. direction: timebase direction for searching the values
 
-Double clicking a row will bring up the range editor for associated signal. 
+Double clicking a row will bring up the range editor for associated signal.
 
 .. image:: images/numeric_range_editor.gif
 
@@ -291,20 +294,20 @@ The Plot window has three section
 1. signal selection tree
 2. graphical area
 3. signal statistics panel (toggled using the ``M`` keyboard shortcut)
-   
+
 Each signal item from the signal selection tree has five elements
 
 1. display enable checkbox
 2. color select button
 3. channel name and unit label
-4. channel value label [4]_     
+4. channel value label [4]_
 5. common axis checkbox
 6. individual axis checkbox [5]_
-   
+
 
 The user can also create channel groups in the selection tree. Simple channel groups are only used for grouping signals. Pattern based channel groups
 can be used to filter signals based on the name or samples values.
-        
+
 The selection tree has an extended context menu accessible using the right mouse click.
 
 Double clicking an item will open a range editor dialog, similar to the Numeric window range editor.
@@ -312,11 +315,11 @@ Double clicking an item will open a range editor dialog, similar to the Numeric 
 
 The initial graphics are view will have all the signal homed-in (see the *H* keyboard shortcut). The user is free to use the mouse to interact with the graphics area (zoom, pan).
 
-The cursor is toggled using the *C* keyboard shortcut, and with it the channel values will be displayed for each item in the *Selected channels list*. 
+The cursor is toggled using the *C* keyboard shortcut, and with it the channel values will be displayed for each item in the *Selected channels list*.
 The cursor can also be invoked by clicking the plot area.
 
 Using the *R* keyboard shortcut will toggle the range, and with it the channel values will be displayed for each item in the *Selected channels list*. When the range is
-enabled, using the *H* keyboard shortcut will not home to the whole time range, but instead will use the range time interval. 
+enabled, using the *H* keyboard shortcut will not home to the whole time range, but instead will use the range time interval.
 
 The *Ctrl+H*, *Ctrl+B* and *Ctrl+P* keyboard shortcuts will
 
@@ -332,7 +335,7 @@ Each vertical axis width can be modified using the + and - buttons.
 
 
 
-You can insert new computed channels by pressing the *insert* key. This will allow either to compute basic operations using the plot channels, to 
+You can insert new computed channels by pressing the *insert* key. This will allow either to compute basic operations using the plot channels, to
 apply a function on one of the plot channels, or to specify a simple expression than uses multiple signals from the Plot window.
 
 .. image:: images/compute_channel_dialog.png
@@ -374,22 +377,22 @@ The tabular window has the following elements:
     The user can modify the existing filters without changing the tabular view.
 13. query: the Tabular window used a pandas dataframe as backend. The filtering is
     done by performing a query on the dataframe.
-    
-    
+
+
 9. File operations
 ^^^^^^^^^^^^^^^^^^
 There are five aspects related to the measurement file that can be accessed using the tabs:
 
 1. channels: here the user can visualize the signals using the available window types
-2. modify & export: this tab contains the tools needed for processing the measurement file. 
+2. modify & export: this tab contains the tools needed for processing the measurement file.
    The use can filter signals, cut and resample the measurement, or export it to other file formats.
-3. bus logging: this tab is only visible for the measurements that contain CAN or LIN bus logging. 
+3. bus logging: this tab is only visible for the measurements that contain CAN or LIN bus logging.
    The user can decode the raw bus logging using database files (.dbc, .ldf, .arxml)
 4. attachments: this tab is only visible if the measurement contains attachments.
    The user can extract the attachment and save it to a new file.
 5. info: this tab contains an overview of the measurement file content (channel groups, file header comments, total number of channels)
 
- 
+
 
 10. CAN/LIN/FlexRay Bus Trace
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -406,7 +409,7 @@ Channels can be dragged and dropped between sub-windows for easier configuration
 
 Batch processing
 ================
-The *Batch processing* view is used to concatenate or stack multiple files, or to perform the same processing steps on multiple files. 
+The *Batch processing* view is used to concatenate or stack multiple files, or to perform the same processing steps on multiple files.
 Keep in mind that the order of the input files is always preserved, only the samples timestamps are influenced by the ``Sync using measurements timestamps`` checkbox.
 
 .. image:: images/multiple_files.png
@@ -423,7 +426,7 @@ Keep in mind that the order of the input files is always preserved, only the sam
     d. bus logging: similar to the single files view
 
 The files list can be rearranged in the list (1) by drag and dropping lines. Unwanted files can be deleted by
-selecting them and pressing the *DEL* key. The files order is considered from top to bottom. 
+selecting them and pressing the *DEL* key. The files order is considered from top to bottom.
 
 Comparison
 ==========
@@ -433,12 +436,9 @@ with the measurement index.
 .. rubric:: Footnotes
 
 .. [1] If the cursor is present then zooming will center on it.
-.. [2] Clicking the plot will move the left margin of the region. Pressing CTRL while clicking the plot will move the right margin of the region. 
+.. [2] Clicking the plot will move the left margin of the region. Pressing CTRL while clicking the plot will move the right margin of the region.
 .. [3] New in *asammdf 5.7.0*
 .. [4] the value is only displayed if the cursor or range are active. For the cursor is will show the current value, and for the range it will show the value delta between the range start and stop timestamps
 .. [5] New in *asammdf 5.7.0*
 .. [6] New in *asammdf 5.20.0*
 .. [7] New in *asammdf 7.1.0*
-
-
-

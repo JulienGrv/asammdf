@@ -2,8 +2,8 @@ from functools import partial
 import weakref
 
 import numpy as np
-import pyqtgraph as pg  # type: ignore[import-untyped]
-import pyqtgraph.functions as fn  # type: ignore[import-untyped]
+import pyqtgraph as pg
+import pyqtgraph.functions as fn
 from PySide6 import QtCore, QtGui, QtWidgets
 
 

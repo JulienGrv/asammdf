@@ -12,9 +12,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import dateutil.tz
 import numpy as np
-import pyqtgraph as pg  # type: ignore[import-untyped]
+import pyqtgraph as pg
 from pyqtgraph import Qt
-import pyqtgraph.functions as fn  # type: ignore[import-untyped]
+import pyqtgraph.functions as fn
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ... import tool as Tool

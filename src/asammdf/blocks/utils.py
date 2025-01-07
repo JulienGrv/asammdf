@@ -1235,9 +1235,9 @@ def components(
     channel_name: str,
     unique_names: UniqueDB,
     prefix: str = "",
-    master: Optional[Union[pd.Index[float], pd.Index[int]]] = None,
+    master: Optional[Union["pd.Index[float]", "pd.Index[int]"]] = None,
     only_basenames: bool = False,
-) -> Iterator[tuple[str, Series[Any]]]:
+) -> Iterator[tuple[str, "Series[Any]"]]:
     """yield pandas Series and unique name based on the ndarray object
 
     Parameters
@@ -1570,7 +1570,7 @@ def csv_int2bin(val) -> str:
 csv_int2bin = np.vectorize(csv_int2bin, otypes=[str])
 
 
-def csv_int2hex(val: pd.Series[bool]) -> str:
+def csv_int2hex(val: "pd.Series[bool]") -> str:
     """format CAN id as hex
 
     100 -> 64

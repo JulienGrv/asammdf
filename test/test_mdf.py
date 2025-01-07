@@ -8,7 +8,7 @@ import urllib
 import urllib.request
 from zipfile import ZipFile
 
-import numexpr  # type: ignore[import-untyped]
+import numexpr
 import numpy as np
 from pandas import DataFrame
 
