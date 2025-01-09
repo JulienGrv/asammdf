@@ -12,7 +12,7 @@ from textwrap import wrap
 import time
 from traceback import format_exc
 import typing
-from typing import Any, Optional, SupportsBytes, TYPE_CHECKING, Union
+from typing import Optional, SupportsBytes, TYPE_CHECKING, Union
 from xml.dom import minidom
 import xml.etree.ElementTree as ET
 
@@ -358,10 +358,10 @@ class AttachmentBlock:
 
         return address
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __bytes__(self) -> bytes:
@@ -1089,10 +1089,10 @@ class Channel:
 
         self.standard_C_size = True
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def to_blocks(
@@ -1734,10 +1734,10 @@ class ChannelArrayBlock(_ChannelArrayBlockBase):
                     for i in range(dims_nr):
                         self[f"dim_size_{i}"] = kwargs[f"dim_size_{i}"]
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __str__(self) -> str:
@@ -2096,10 +2096,10 @@ class ChannelGroup:
                 self.block_len = v4c.CG_BLOCK_SIZE
                 self.links_nr = 6
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def to_blocks(
@@ -4218,10 +4218,10 @@ formula: {self.formula}
 
         return "\n".join(metadata)
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __contains__(self, item: str) -> bool:
@@ -4536,10 +4536,10 @@ class DataBlock:
             self.links_nr = 0
             self.data = kwargs["data"]
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __bytes__(self) -> bytes:
@@ -4660,7 +4660,7 @@ class DataZippedBlock:
         self._prevent_data_setitem = False
         self.return_unzipped = True
 
-    def __setattr__(self, item: str, value: Any) -> None:
+    def __setattr__(self, item: str, value: object) -> None:
         if item == "data" and not self._prevent_data_setitem:
             data = value
             original_size = len(data)
@@ -4692,7 +4692,7 @@ class DataZippedBlock:
             DataZippedBlock.__dict__[item].__set__(self, value)
             DataZippedBlock.__dict__["_transposed"].__set__(self, False)
 
-    def __getattribute__(self, item: str) -> Any:
+    def __getattribute__(self, item: str) -> object:
         if item == "data":
             if self.return_unzipped:
                 data = DataZippedBlock.__dict__[item].__get__(self)
@@ -4719,10 +4719,10 @@ class DataZippedBlock:
             value = DataZippedBlock.__dict__[item].__get__(self)
         return value
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
     def __str__(self) -> str:
@@ -4903,10 +4903,10 @@ class DataGroup:
 
         return address
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __bytes__(self) -> bytes:
@@ -5078,10 +5078,10 @@ class DataList(_DataListBase):
                 for i in range(self.data_block_nr):
                     self[f"offset_{i}"] = kwargs[f"offset_{i}"]
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __bytes__(self) -> bytes:
@@ -5350,10 +5350,10 @@ class EventBlock(_EventBlockBase):
 
         return result
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __str__(self) -> str:
@@ -5479,10 +5479,10 @@ class FileIdentificationBlock:
             self.unfinalized_standard_flags = 0
             self.unfinalized_custom_flags = 0
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __bytes__(self) -> bytes:
@@ -5619,10 +5619,10 @@ class FileHistory:
 
         return address
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __bytes__(self) -> bytes:
@@ -5943,10 +5943,10 @@ class HeaderBlock:
     def subject(self, value: str) -> None:
         self._common_properties["subject"] = value
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     @property
@@ -6136,10 +6136,10 @@ class HeaderList:
             self.zip_type = kwargs.get("zip_type", 0)
             self.reserved1 = b"\x00" * 5
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __bytes__(self) -> bytes:
@@ -6356,10 +6356,10 @@ class ListData(_ListDataBase):
 
             self.block_len = 24 + self.links_nr * 8 + 16
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __bytes__(self) -> bytes:
@@ -6531,10 +6531,10 @@ class SourceInformation:
             self.flags = 0
             self.reserved1 = b"\x00" * 5
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __contains__(self, item: str) -> bool:
@@ -6805,10 +6805,10 @@ class TextBlock:
 
             self.block_len = size + 32 - size % 8
 
-    def __getitem__(self, item: str) -> Any:
+    def __getitem__(self, item: str) -> object:
         return self.__getattribute__(item)
 
-    def __setitem__(self, item: str, value: Any) -> None:
+    def __setitem__(self, item: str, value: object) -> None:
         self.__setattr__(item, value)
 
     def __bytes__(self) -> bytes:

@@ -213,6 +213,7 @@ ID_KEYS = (
 )
 
 HEADER_COMMON_FMT = "<2sH3IH10s8s32s32s32s32s"
+HeaderCommon = tuple[bytes, int, int, int, int, int, bytes, bytes, bytes, bytes, bytes, bytes]
 HEADER_COMMON_KEYS = (
     "id",
     "block_len",
@@ -236,6 +237,7 @@ COMMON_uf: Callable[[Buffer, int], _Common] = struct.Struct(FMT_COMMON).unpack_f
 COMMON_p = struct.Struct(FMT_COMMON).pack
 
 HEADER_POST_320_EXTRA_FMT = "QhH32s"
+HeaderPost320Extra = tuple[int, int, int, bytes]
 HEADER_POST_320_EXTRA_KEYS = (
     "abs_time",
     "tz_offset",
@@ -500,5 +502,5 @@ KEYS_SAMPLE_REDUCTION_BLOCK = (
     "time_interval",
 )
 
-UINT32_u = struct.Struct("<I").unpack
-UINT32_uf = struct.Struct("<I").unpack_from
+UINT32_u: Callable[[Buffer], tuple[int]] = struct.Struct("<I").unpack
+UINT32_uf: Callable[[Buffer, int], tuple[int]] = struct.Struct("<I").unpack_from
