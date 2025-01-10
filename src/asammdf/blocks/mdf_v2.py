@@ -1,7 +1,5 @@
 """ ASAM MDF version 2 file format module """
 
-from __future__ import annotations
-
 from typing import Optional, Union
 
 from ..types import StrPathType

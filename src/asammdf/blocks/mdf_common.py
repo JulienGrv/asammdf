@@ -2,8 +2,6 @@
 ASAM MDF version 4 file format module
 """
 
-from __future__ import annotations
-
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from io import StringIO
@@ -45,9 +43,9 @@ class CanBusInfo(TypedDict):
     dbc_files: Iterable[DbcFileType]
     total_unique_ids: set[tuple[int, bool]]
     unknown_id_count: int
-    not_found_ids: defaultdict[StrPathType, list[tuple[tuple[int, bool] | int, str]]]
+    not_found_ids: defaultdict[StrPathType, list[tuple[Union[tuple[int, bool], int], str]]]
     found_ids: defaultdict[StrPathType, set[tuple[tuple[int, int, bool], str]]]
-    unknown_ids: set[int | tuple[int, bool]]
+    unknown_ids: set[Union[tuple[int, bool], int]]
 
 
 class LinBusInfo(TypedDict):
@@ -163,7 +161,7 @@ def debug_channel(
     group: Group,
     channel: ChannelType,
     dependency: list[tuple[int, int]],
-    file: StringIO | None = None,
+    file: Optional[StringIO] = None,
 ) -> None:
     """use this to print debug information in case of errors
 
@@ -212,15 +210,15 @@ def debug_channel(
 class MDF_Common:
     """common methods for MDF objects"""
 
-    def _set_temporary_master(self, master: NDArray[Any] | None) -> None:
+    def _set_temporary_master(self, master: Optional[NDArray[Any]]) -> None:
         self._master = master
 
     # @lru_cache(maxsize=1024)
     def _validate_channel_selection(
         self,
-        name: str | None = None,
-        group: int | None = None,
-        index: int | None = None,
+        name: Optional[str] = None,
+        group: Optional[int] = None,
+        index: Optional[int] = None,
     ) -> tuple[int, int]:
         """Gets channel comment.
         Channel can be specified in two ways:

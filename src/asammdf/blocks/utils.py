@@ -69,6 +69,7 @@ except:
             encoding: Optional[str]
 
         def detect(text: bytes) -> DetectDict:
+            encoding: Optional[str]
             for encoding in ("utf-8", "latin-1", "cp1250", "cp1252"):
                 try:
                     text.decode(encoding)
@@ -236,7 +237,7 @@ def matlab_compatible(name: str) -> str:
 @overload
 def get_text_v3(
     address: int,
-    stream: Union["FileLike", Buffer],
+    stream: Union["FileLike", mmap.mmap],
     mapped: bool = ...,
     decode: Literal[True] = ...,
 ) -> str: ...
@@ -245,14 +246,14 @@ def get_text_v3(
 @overload
 def get_text_v3(
     address: int,
-    stream: Union["FileLike", Buffer],
+    stream: Union["FileLike", mmap.mmap],
     mapped: bool = ...,
     decode: Literal[False] = ...,
 ) -> bytes: ...
 
 
 def get_text_v3(
-    address: int, stream: Union["FileLike", Buffer], mapped: bool = False, decode: bool = True
+    address: int, stream: Union["FileLike", mmap.mmap], mapped: bool = False, decode: bool = True
 ) -> Union[str, bytes]:
     """faster way to extract strings from mdf versions 2 and 3 TextBlock
 
@@ -273,7 +274,7 @@ def get_text_v3(
     if address == 0:
         return "" if decode else b""
 
-    if mapped:
+    if stream_is_mmap(stream, mapped):
         block_id = stream[address : address + 2]
         if block_id != b"TX":
             return "" if decode else b""
@@ -286,14 +287,19 @@ def get_text_v3(
             return "" if decode else b""
         size = UINT16_u(stream.read(2))[0] - 4
         text_bytes = stream.read(size).split(b"\0", 1)[0].strip(b" \r\t\n")
+
+    text: Union[bytes, str]
     if decode:
         try:
             text = text_bytes.decode("latin-1")
         except UnicodeDecodeError:
-            try:
-                encoding = detect(text_bytes)["encoding"]
-                text = text_bytes.decode(encoding, "ignore")
-            except:
+            encoding = detect(text_bytes)["encoding"]
+            if encoding:
+                try:
+                    text = text_bytes.decode(encoding, "ignore")
+                except:
+                    text = "<!text_decode_error>"
+            else:
                 text = "<!text_decode_error>"
     else:
         text = text_bytes

@@ -16,7 +16,7 @@ import dateutil.tz
 from numexpr import evaluate
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from typing_extensions import Unpack
+from typing_extensions import TypedDict, Unpack
 
 from .. import tool
 from . import utils
@@ -579,8 +579,8 @@ class Channel:
     def to_blocks(
         self,
         address: int,
-        blocks: list[SupportsBytes],
-        defined_texts: dict[str, int],
+        blocks: list[Union[bytes, SupportsBytes]],
+        defined_texts: dict[Union[bytes, str], int],
         cc_map: dict[bytes, int],
         si_map: dict[bytes, int],
     ) -> int:
@@ -903,6 +903,10 @@ class ChannelConversionKwargs(BlockKwargs, total=False):
     default_addr: bytes
 
 
+class _ReferencedBlocks(TypedDict, total=False):
+    default_addr: bytes
+
+
 class ChannelConversion(_ChannelConversionBase):
     """CCBLOCK class
 
@@ -993,7 +997,7 @@ class ChannelConversion(_ChannelConversionBase):
         self.unit = self.formula = ""
         self.unit_field: Union[bytes, str]
 
-        self.referenced_blocks: dict[str, Union[ChannelConversion, bytes]] = {}
+        self.referenced_blocks: dict[str, bytes] = {}
 
         if "raw_bytes" in kwargs or "stream" in kwargs:
             mapped = kwargs.get("mapped", False)
@@ -1069,7 +1073,7 @@ class ChannelConversion(_ChannelConversionBase):
                     conversion = ChannelConversion(raw_bytes=raw_bytes, stream=stream, address=address)
                     conversion.block_len = size
 
-                    self.update(conversion)
+                    # self.update(conversion)
                     self.referenced_blocks = conversion.referenced_blocks
 
                 else:
@@ -1278,8 +1282,8 @@ class ChannelConversion(_ChannelConversionBase):
                 self.conversion_type = kwargs["conversion_type"]
                 self.ref_param_nr = nr
                 for i in range(nr):
-                    self[f"raw_{i}"] = kwargs[f"raw_{i}"]
-                    self[f"phys_{i}"] = kwargs[f"phys_{i}"]
+                    self[f"raw_{i}"] = kwargs[f"raw_{i}"]  # type: ignore[literal-required]
+                    self[f"phys_{i}"] = kwargs[f"phys_{i}"]  # type: ignore[literal-required]
 
             elif kwargs["conversion_type"] == v23c.CONVERSION_TYPE_TABX:
                 nr = kwargs["ref_param_nr"]
@@ -1292,8 +1296,8 @@ class ChannelConversion(_ChannelConversionBase):
                 self.ref_param_nr = nr
 
                 for i in range(nr):
-                    self[f"param_val_{i}"] = kwargs[f"param_val_{i}"]
-                    self[f"text_{i}"] = kwargs[f"text_{i}"]
+                    self[f"param_val_{i}"] = kwargs[f"param_val_{i}"]  # type: ignore[literal-required]
+                    self[f"text_{i}"] = kwargs[f"text_{i}"]  # type: ignore[literal-required]
 
             elif kwargs["conversion_type"] == v23c.CONVERSION_TYPE_RTABX:
                 nr = kwargs["ref_param_nr"]
@@ -1310,16 +1314,16 @@ class ChannelConversion(_ChannelConversionBase):
                 self.default_addr = 0
                 key = "default_addr"
                 if key in kwargs:
-                    self.referenced_blocks[key] = kwargs[key]
+                    self.referenced_blocks[key] = kwargs[key]  # type: ignore[literal-required]
                 else:
                     self.referenced_blocks[key] = b""
 
                 for i in range(nr - 1):
-                    self[f"lower_{i}"] = kwargs[f"lower_{i}"]
-                    self[f"upper_{i}"] = kwargs[f"upper_{i}"]
+                    self[f"lower_{i}"] = kwargs[f"lower_{i}"]  # type: ignore[literal-required]
+                    self[f"upper_{i}"] = kwargs[f"upper_{i}"]  # type: ignore[literal-required]
                     key = f"text_{i}"
                     self[key] = 0
-                    self.referenced_blocks[key] = kwargs[key]
+                    self.referenced_blocks[key] = kwargs[key]  # type: ignore[literal-required]
             else:
                 message = f'Conversion type "{kwargs["conversion_type"]}" not implemented'
                 logger.exception(message)
@@ -1328,8 +1332,8 @@ class ChannelConversion(_ChannelConversionBase):
     def to_blocks(
         self,
         address: int,
-        blocks: list[SupportsBytes],
-        defined_texts: dict[bytes, int],
+        blocks: list[Union[bytes, SupportsBytes]],
+        defined_texts: dict[Union[bytes, str], int],
         cc_map: dict[bytes, int],
     ) -> int:
         self.unit_field = self.unit.encode("latin-1", "ignore")[:19]
@@ -1511,10 +1515,10 @@ address: {hex(self.address)}
 
                 inds = np.searchsorted(raw_vals, new_values)
 
-                inds[inds >= dim] = dim - 1
+                inds[inds >= dim] = dim - 1  # type: ignore[index]
 
                 inds2 = inds - 1
-                inds2[inds2 < 0] = 0
+                inds2[inds2 < 0] = 0  # type: ignore[index]
 
                 cond = np.abs(new_values - raw_vals[inds]) >= np.abs(new_values - raw_vals[inds2])
 
@@ -1542,7 +1546,7 @@ address: {hex(self.address)}
                 new_values[idx] = default
                 idx = np.argwhere(idx1 == idx2).flatten()
                 if len(idx):
-                    new_values[idx] = phys[idx1[idx]]
+                    new_values[idx] = phys[idx1[idx]]  # type: ignore[index]
 
         elif conversion_type == v23c.CONVERSION_TYPE_RTABX:
             if not ignore_value2text_conversions:
@@ -1558,10 +1562,9 @@ address: {hex(self.address)}
                 default = self.referenced_blocks["default_addr"]
 
                 if b"{X}" in default:
-                    default = default.decode("latin-1").replace("{X}", "X").split('"')[1]
-                    partial_conversion = True
+                    default_text = default.decode("latin-1").replace("{X}", "X").split('"')[1]
                 else:
-                    partial_conversion = False
+                    default_text = None
 
                 lower = np.array([self[f"lower_{i}"] for i in range(nr)])
                 upper = np.array([self[f"upper_{i}"] for i in range(nr)])
@@ -1571,12 +1574,12 @@ address: {hex(self.address)}
 
                 idx = np.argwhere(idx1 != idx2).flatten()
 
-                if partial_conversion and len(idx):
+                if default_text and len(idx):
                     X = new_values[idx]
                     new_values = np.zeros(len(new_values), dtype=np.float64)
 
-                    a = float(default.split("*")[0])
-                    b = float(default.split("X")[-1])
+                    a = float(default_text.split("*")[0])
+                    b = float(default_text.split("X")[-1])
                     new_values[idx] = a * X + b
 
                     idx = np.argwhere(idx1 == idx2).flatten()
@@ -1590,13 +1593,14 @@ address: {hex(self.address)}
 
                         idx = np.argwhere(idx1 == idx2).flatten()
                         if len(idx):
-                            new_values[idx] = phys[idx1[idx]]
+                            new_values[idx] = phys[idx1[idx]]  # type: ignore[index]
                     else:
                         new_values = phys[idx1]
 
         elif conversion_type in (v23c.CONVERSION_TYPE_EXPO, v23c.CONVERSION_TYPE_LOGH):
             # pylint: disable=C0103
 
+            func: np.ufunc
             if conversion_type == v23c.CONVERSION_TYPE_EXPO:
                 func = np.exp
             else:
@@ -1860,7 +1864,7 @@ class ChannelDependency:
             i = 0
             while True:
                 try:
-                    self[f"dim_{i}"] = kwargs[f"dim_{i}"]
+                    self[f"dim_{i}"] = kwargs[f"dim_{i}"]  # type: ignore[literal-required]
                     i += 1
                 except KeyError:
                     break
@@ -2075,8 +2079,8 @@ class ChannelExtension:
     def to_blocks(
         self,
         address: int,
-        blocks: list[SupportsBytes],
-        defined_texts: dict[str, int],
+        blocks: list[Union[bytes, SupportsBytes]],
+        defined_texts: dict[Union[bytes, str], int],
         cc_map: dict[bytes, int],
     ) -> int:
         if self.type == v23c.SOURCE_ECU:
@@ -3335,11 +3339,11 @@ class TriggerBlock:
 
             for i in range(nr):
                 key = f"trigger_{i}_time"
-                self[key] = kwargs[key]
+                self[key] = kwargs[key]  # type: ignore[literal-required]
                 key = f"trigger_{i}_pretime"
-                self[key] = kwargs[key]
+                self[key] = kwargs[key]  # type: ignore[literal-required]
                 key = f"trigger_{i}_posttime"
-                self[key] = kwargs[key]
+                self[key] = kwargs[key]  # type: ignore[literal-required]
 
     def to_blocks(self, address: int, blocks: list[SupportsBytes]) -> int:
         key = "text_addr"

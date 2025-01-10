@@ -146,6 +146,7 @@ ignore = [
     "PLW2901", # redefined-loop-name
     "RUF012",  # mutable-class-default
     "RUF015",  # unnecessary-iterable-allocation-for-first-element
+    "UP007",
 ]
 
 [tool.ruff.lint.isort]
