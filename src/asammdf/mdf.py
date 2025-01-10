@@ -38,8 +38,10 @@ from pandas.api.extensions import ExtensionArray
 from typing_extensions import Literal, TypedDict, Unpack
 
 from . import tool
-from .blocks import bus_logging_utils, mdf_v2, mdf_v3, mdf_v4, v2_v3_blocks, v4_blocks
+from .blocks import bus_logging_utils, mdf_v2, mdf_v3, mdf_v4
+from .blocks import v2_v3_blocks as v3b
 from .blocks import v2_v3_constants as v23c
+from .blocks import v4_blocks as v4b
 from .blocks import v4_constants as v4c
 from .blocks.conversion_utils import from_dict
 from .blocks.mdf_common import CommonKwargs, Group, MdfKwargs
@@ -128,7 +130,7 @@ def get_measurement_timestamp_and_version(mdf: FileLike) -> tuple[datetime, str]
     id_block = FileIdentificationBlock(stream=mdf)
 
     version = id_block.mdf_version
-    header: Union[v4_blocks.HeaderBlock, v2_v3_blocks.HeaderBlock]
+    header: Union[v4b.HeaderBlock, v3b.HeaderBlock]
     if version >= 400:
         header = HeaderV4(address=64, stream=mdf)
     else:
@@ -479,7 +481,7 @@ class MDF:
         return self._mdf.events
 
     @property
-    def file_history(self) -> list[v4_blocks.FileHistory]:
+    def file_history(self) -> list[v4b.FileHistory]:
         if not isinstance(self._mdf, mdf_v4.MDF4):
             raise MdfException("the attribute 'file_history' is only available for MDF4")
         return self._mdf.file_history
@@ -489,7 +491,7 @@ class MDF:
         return self._mdf.groups
 
     @property
-    def header(self) -> v2_v3_blocks.HeaderBlock | v4_blocks.HeaderBlock:
+    def header(self) -> Union[v3b.HeaderBlock, v4b.HeaderBlock]:
         return self._mdf.header
 
     @property
@@ -763,7 +765,7 @@ class MDF:
 
     @staticmethod
     def _transfer_channel_group_data(sgroup: ChannelGroupType, ogroup: ChannelGroupType) -> None:
-        if not (isinstance(sgroup, v4_blocks.ChannelGroup) and isinstance(ogroup, v4_blocks.ChannelGroup)):
+        if not (isinstance(sgroup, v4b.ChannelGroup) and isinstance(ogroup, v4b.ChannelGroup)):
             sgroup.comment = ogroup.comment
         else:
             sgroup.flags = ogroup.flags

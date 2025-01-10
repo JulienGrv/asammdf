@@ -2,6 +2,7 @@
 ASAM MDF version 4 file format module
 """
 
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 import logging
@@ -14,8 +15,15 @@ from numpy.typing import DTypeLike, NDArray
 from typing_extensions import Required, TypedDict
 
 from ..types import DbcFileType, StrPathType
-from . import v2_v3_blocks, v4_blocks
-from .utils import DataBlockInfo, EMPTY_TUPLE, MdfException, SignalDataBlockInfo
+from . import v2_v3_blocks as v3b
+from . import v4_blocks as v4b
+from .utils import (
+    ChannelsDB,
+    DataBlockInfo,
+    EMPTY_TUPLE,
+    MdfException,
+    SignalDataBlockInfo,
+)
 
 logger = logging.getLogger("asammdf")
 
@@ -61,9 +69,9 @@ class BusInfo(TypedDict, total=False):
     LIN: LinBusInfo
 
 
-_DG = TypeVar("_DG", v2_v3_blocks.DataGroup, v4_blocks.DataGroup)
-_CG = TypeVar("_CG", v2_v3_blocks.ChannelGroup, v4_blocks.ChannelGroup)
-_CN = TypeVar("_CN", v2_v3_blocks.Channel, v4_blocks.Channel)
+_DG = TypeVar("_DG", v3b.DataGroup, v4b.DataGroup)
+_CG = TypeVar("_CG", v3b.ChannelGroup, v4b.ChannelGroup)
+_CN = TypeVar("_CN", v3b.Channel, v4b.Channel)
 
 
 class Group(Generic[_DG, _CG, _CN]):
@@ -90,22 +98,22 @@ class Group(Generic[_DG, _CG, _CN]):
     )
 
     def __init__(self, data_group: _DG) -> None:
-        self.data_group = data_group
+        self.data_group: _DG = data_group
         self.channel_group: _CG
         self.channels: list[_CN] = []
-        self.channel_dependencies = []
-        self.signal_data = []
+        self.channel_dependencies: list[v3b.ChannelDependency] = []
+        self.signal_data: list[Optional[tuple[list[SignalDataBlockInfo], Iterator[SignalDataBlockInfo]]]] = []
         self.record: list[Optional[tuple[np.dtype[Any], int, int, int]]] = []
         self.record_size: dict[int, int] = {}
-        self.trigger: Optional[v2_v3_blocks.TriggerBlock] = None
+        self.trigger: Optional[v3b.TriggerBlock] = None
         self.sorted: bool
         self.string_dtypes: list[DTypeLike] = []
-        self.data_blocks = []
+        self.data_blocks: list[DataBlockInfo] = []
         self.signal_types: list[int]
         self.single_channel_dtype = None
         self.uses_ld = False
         self.read_split_count = 0
-        self.data_blocks_info_generator = iter(EMPTY_TUPLE)
+        self.data_blocks_info_generator: Iterator[DataBlockInfo] = iter(EMPTY_TUPLE)
         self.uuid = ""
         self.data_location: int
         self.index = 0
@@ -127,7 +135,7 @@ class Group(Generic[_DG, _CG, _CN]):
         self.channels.clear()
         self.channel_dependencies.clear()
         self.signal_data.clear()
-        self.data_blocks_info_generator = None
+        self.data_blocks_info_generator = iter(())
 
     def get_data_blocks(self) -> Iterator[DataBlockInfo]:
         yield from self.data_blocks
@@ -143,20 +151,26 @@ class Group(Generic[_DG, _CG, _CN]):
     def get_signal_data_blocks(self, index: int) -> Iterator[SignalDataBlockInfo]:
         signal_data = self.signal_data[index]
         if signal_data is not None:
-            signal_data, signal_generator = signal_data
-            yield from signal_data
+            signal_data_blocks, signal_generator = signal_data
+            yield from signal_data_blocks
 
             while True:
                 try:
                     info = next(signal_generator)
-                    signal_data.append(info)
+                    signal_data_blocks.append(info)
                     yield info
                 except StopIteration:
                     break
 
 
-class MDF_Common:
+class MDF_Common(ABC):
     """common methods for MDF objects"""
+
+    @abstractmethod
+    def __init__(self) -> None:
+        self.groups: list[Group]
+        self.channels_db: ChannelsDB
+        self._raise_on_multiple_occurrences: bool
 
     def _set_temporary_master(self, master: Optional[NDArray[Any]]) -> None:
         self._master = master

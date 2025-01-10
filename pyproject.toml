@@ -93,13 +93,25 @@ skip = ["pp*", "*_ppc64le", "*-musllinux*", "*_s390x"]
 
 [tool.mypy]
 files = "."
-exclude = ["build/", "dist/", "doc/_build/", "src/asammdf/gui/"]
+exclude = [
+    "build/",
+    "dist/",
+    "doc/_build/",
+    "src/asammdf/blocks/bus_logging_utils.py",
+    "src/asammdf/blocks/conversion_utils.py",
+    "src/asammdf/blocks/mdf_v4.py",
+    "src/asammdf/blocks/v4_blocks.py",
+    "src/asammdf/gui/",
+    "src/asammdf/mdf.py",
+    "src/asammdf/signal.py",
+]
 python_version = "3.9"
 plugins = ["numpy.typing.mypy_plugin"]
 
 [[tool.mypy.overrides]]
 module = [
     "canmatrix.*",
+    "cchardet.*",
     "cmerg.*",
     "fsspec.*",
     "h5py",

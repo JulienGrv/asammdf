@@ -40,17 +40,17 @@ try:
     from pyqtgraph import functions as fn
 except ImportError:
 
-    class fn:
+    class fn:  # type: ignore[no-redef]
         @classmethod
-        def mkColor(cls, color):
+        def mkColor(cls, color: str) -> str:
             return color
 
         @classmethod
-        def mkPen(cls, color):
+        def mkPen(cls, color: str) -> str:
             return color
 
         @classmethod
-        def mkBrush(cls, color):
+        def mkBrush(cls, color: str) -> str:
             return color
 
 
@@ -163,7 +163,7 @@ ALLOWED_MATLAB_CHARS = set(string.ascii_letters + string.digits + "_")
 class MdfException(Exception):
     """MDF Exception class"""
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"asammdf MdfException: {self.args[0]}"
 
 
@@ -184,15 +184,15 @@ def extract_xml_comment(comment: str) -> str:
 
     comment = comment.replace(' xmlns="http://www.asam.net/mdf/v4"', "")
     try:
-        comment = ET.fromstring(comment)
-        match = comment.find(".//TX")
+        comment_elem = ET.fromstring(comment)
+        match = comment_elem.find(".//TX")
         if match is None:
-            common_properties = comment.find(".//common_properties")
+            common_properties = comment_elem.find(".//common_properties")
             if common_properties is not None:
-                comment = []
+                comments: list[str] = []
                 for e in common_properties:
                     field = f'{e.get("name")}: {e.text}'
-                    comment.append(field)
+                    comments.append(field)
                 comment = "\n".join(field)
             else:
                 comment = ""
@@ -219,8 +219,8 @@ def matlab_compatible(name: str) -> str:
 
     """
 
-    compatible_name = [ch if ch in ALLOWED_MATLAB_CHARS else "_" for ch in name]
-    compatible_name = "".join(compatible_name)
+    compatible_names = [ch if ch in ALLOWED_MATLAB_CHARS else "_" for ch in name]
+    compatible_name = "".join(compatible_names)
 
     if compatible_name[0] not in string.ascii_letters:
         compatible_name = "M_" + compatible_name
@@ -392,6 +392,8 @@ def extract_display_names(comment: str) -> dict[str, str]:
             for i, elem in enumerate(names.iter()):
                 if i == 0:
                     continue
+                if elem.text is None:
+                    raise ValueError("text is None")
                 display_names[elem.text.strip(" \t\r\n\v\0")] = elem.tag
 
         except:
@@ -400,17 +402,44 @@ def extract_display_names(comment: str) -> dict[str, str]:
     return display_names
 
 
-def extract_encryption_information(comment: str) -> dict[str, str]:
-    info = {}
+class EncryptionInfo(TypedDict, total=False):
+    encrypted: bool
+    algorithm: str
+    original_md5_sum: str
+    original_size: int
+
+
+def extract_encryption_information(comment: str) -> EncryptionInfo:
+    info: EncryptionInfo = {}
     comment = comment.replace(' xmlns="http://www.asam.net/mdf/v4"', "")
     if comment.startswith("<ATcomment") and "<encrypted>" in comment:
         try:
-            comment = ET.fromstring(comment)
-            for match in comment.findall(".//extensions/extension"):
-                encrypted = match.find("encrypted").text.strip().lower() == "true"
-                algorithm = match.find("algorithm").text.strip().lower()
-                original_md5_sum = match.find("original_md5_sum").text.strip().lower()
-                original_size = int(match.find("original_size").text)
+            comment_elem = ET.fromstring(comment)
+            for match in comment_elem.findall(".//extensions/extension"):
+                elem = match.find("encrypted")
+                if elem is None:
+                    raise RuntimeError("cannot find 'encrypted' Element")
+                if elem.text is None:
+                    raise RuntimeError("text is None")
+                encrypted = elem.text.strip().lower() == "true"
+                elem = match.find("algorithm")
+                if elem is None:
+                    raise RuntimeError("cannot find 'algorithm' Element")
+                if elem.text is None:
+                    raise RuntimeError("text is None")
+                algorithm = elem.text.strip().lower()
+                elem = match.find("original_md5_sum")
+                if elem is None:
+                    raise RuntimeError("cannot find 'original_md5_sum' Element")
+                if elem.text is None:
+                    raise RuntimeError("text is None")
+                original_md5_sum = elem.text.strip().lower()
+                elem = match.find("original_size")
+                if elem is None:
+                    raise RuntimeError("cannot find 'original_size' Element")
+                if elem.text is None:
+                    raise RuntimeError("text is None")
+                original_size = int(elem.text)
 
                 info["encrypted"] = encrypted
                 info["algorithm"] = algorithm
@@ -427,8 +456,8 @@ def extract_ev_tool(comment: str) -> str:
     tool = ""
     comment = comment.replace(' xmlns="http://www.asam.net/mdf/v4"', "")
     try:
-        comment = ET.fromstring(comment)
-        match = comment.find(".//tool")
+        comment_elem = ET.fromstring(comment)
+        match = comment_elem.find(".//tool")
         if match is None:
             tool = ""
         else:
@@ -869,7 +898,7 @@ def count_channel_groups(
         if blk_id == b"##HD":
             version = 4
         else:
-            raise MdfException(f'"{stream.name}" is not a valid MDF file')
+            raise MdfException(f'"{stream.name if is_file_like(stream) else stream}" is not a valid MDF file')
 
     if version >= 4:
         if mapped:
@@ -1048,8 +1077,9 @@ def randomized_string(size: int) -> bytes:
 
 
 @runtime_checkable
-class FileLike(Protocol):
-    def __iter__(self) -> Iterator[bytes]: ...
+class FileLike(Buffer, Iterator[bytes], Protocol):
+    @property
+    def name(self) -> str: ...
     def close(self) -> None: ...
     def read(self, n: int = -1) -> bytes: ...
     def seek(self, offset: int, whence: int = 0) -> int: ...
@@ -1184,7 +1214,7 @@ def get_video_stream_duration(stream: bytes) -> Optional[float]:
         in_file.write_bytes(stream)
 
         try:
-            result = subprocess.run(
+            process = subprocess.run(
                 [
                     "ffprobe",
                     "-v",
@@ -1198,7 +1228,7 @@ def get_video_stream_duration(stream: bytes) -> Optional[float]:
                 capture_output=True,
                 check=False,
             )
-            result = float(result.stdout)
+            result = float(process.stdout)
         except FileNotFoundError:
             result = None
     return result
@@ -1217,11 +1247,11 @@ class VirtualChannelGroup:
     )
 
     def __init__(self) -> None:
-        self.groups = []
+        self.groups: list[int] = []
         self.record_size = 0
         self.cycles_nr = 0
 
-    def __repr__(self) -> None:
+    def __repr__(self) -> str:
         return f"VirtualChannelGroup(groups={self.groups}, records_size={self.record_size}, cycles_nr={self.cycles_nr})"
 
 
@@ -1247,7 +1277,7 @@ def components(
     prefix: str = "",
     master: Optional[Union["pd.Index[float]", "pd.Index[int]"]] = None,
     only_basenames: bool = False,
-) -> Iterator[tuple[str, "Series[Any]"]]:
+) -> Iterator[tuple[str, "pd.Series[Any]"]]:
     """yield pandas Series and unique name based on the ndarray object
 
     Parameters
@@ -1609,31 +1639,29 @@ def load_can_database(
     """
     path = Path(path)
     import_type = path.suffix.lstrip(".").lower()
-    if contents is None:
-        func = canmatrix.formats.loadp
-        arg = path
-    else:
-        func = canmatrix.formats.loads
-        arg = contents
 
     try:
-        dbs = func(arg, import_type=import_type, key="db", **kwargs)
+        if contents is None:
+            dbs = canmatrix.formats.loadp(str(path), import_type=import_type, key="db", **kwargs)
+        else:
+            dbs = canmatrix.formats.loads(contents, import_type=import_type, key="db", **kwargs)
     except UnicodeDecodeError:
         if contents is None:
             contents = path.read_bytes()
 
-        encoding = detect(contents)["encoding"]
+        encoding = detect(contents)["encoding"]  # type: ignore[arg-type]
 
-        try:
-            dbs = func(
-                arg,
-                import_type=import_type,
-                key="db",
-                encoding=encoding,
-                **kwargs,
-            )
-        except:
-            dbs = None
+        if encoding:
+            try:
+                dbs = canmatrix.formats.loads(
+                    contents,
+                    import_type=import_type,
+                    key="db",
+                    encoding=encoding,
+                    **kwargs,
+                )
+            except:
+                dbs = None
 
     if dbs:
         # filter only CAN clusters
@@ -1661,7 +1689,7 @@ def load_can_database(
     return can_matrix
 
 
-def all_blocks_addresses(obj: Union[FileLike, mmap.mmap]):
+def all_blocks_addresses(obj: Union[FileLike, mmap.mmap]) -> tuple[dict[int, bytes], dict[bytes, list[int]], list[int]]:
     DG = "DG\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00"
     others = "(D[VTZIL]|AT|C[AGHNC]|EV|FH|HL|LD|MD|R[DVI]|S[IRD]|TX)\x00\x00\x00\x00"
     pattern = re.compile(
@@ -1674,18 +1702,19 @@ def all_blocks_addresses(obj: Union[FileLike, mmap.mmap]):
     except:
         pass
 
+    source: Buffer
     try:
         re.search(pattern, obj)
         source = obj
     except TypeError:
         source = obj.read()
 
-    addresses = []
-    block_groups = {}
-    blocks = {}
+    addresses: list[int] = []
+    block_groups: dict[bytes, list[int]] = {}
+    blocks: dict[int, bytes] = {}
 
     for match in re.finditer(pattern, source):
-        btype = match.group("block")[:4]
+        btype: bytes = match.group("block")[:4]
         start = match.start()
 
         if start % 8:

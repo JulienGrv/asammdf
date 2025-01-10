@@ -80,7 +80,7 @@ from .cutils import (
     get_vlsd_max_sample_size,
     sort_data_block,
 )
-from .mdf_common import BusInfo, CommonKwargs, debug_channel, MDF_Common
+from .mdf_common import BusInfo, CommonKwargs, MDF_Common
 from .options import get_global_option
 from .source_utils import Source
 from .utils import (

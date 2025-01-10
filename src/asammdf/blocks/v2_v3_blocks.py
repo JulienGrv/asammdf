@@ -662,7 +662,7 @@ class Channel:
         max_len = max(len(key) for key in self)
         template = f"{{: <{max_len}}}: {{}}"
 
-        metadata = []
+        metadata: list[str] = []
         lines = f"""
 name: {self.name}
 display names: {self.display_names}
@@ -1417,7 +1417,7 @@ class ChannelConversion(_ChannelConversionBase):
         max_len = max(len(key) for key in keys)
         template = f"{{: <{max_len}}}: {{}}"
 
-        metadata = []
+        metadata: list[str] = []
         lines = f"""
 address: {hex(self.address)}
 
@@ -2129,7 +2129,7 @@ class ChannelExtension:
         max_len = max(len(key) for key in keys)
         template = f"{{: <{max_len}}}: {{}}"
 
-        metadata = []
+        metadata: list[str] = []
         lines = f"""
 address: {hex(self.address)}
 
@@ -2418,7 +2418,7 @@ class ChannelGroup:
         max_len = max(len(key) for key in keys)
         template = f"{{: <{max_len}}}: {{}}"
 
-        metadata = []
+        metadata: list[str] = []
         lines = f"""
 address: {hex(self.address)}
 comment: {self.comment}
