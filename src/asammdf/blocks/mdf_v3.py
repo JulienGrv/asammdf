@@ -189,7 +189,7 @@ class MDF3(MDF_Common):
 
     def __init__(
         self,
-        name: StrPathType | FileLike | None = None,
+        name: Optional[Union[str, os.PathLike[str], FileLike]] = None,
         version: Version = default_version,
         channels: list[str] | None = None,
         **kwargs: Unpack[_Kwargs],

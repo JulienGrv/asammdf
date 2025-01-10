@@ -2106,7 +2106,7 @@ class ChannelGroup:
         self,
         address: int,
         blocks: list[SupportsBytes],
-        defined_texts: dict[Union[str, bytes], int],
+        defined_texts: dict[Union[bytes, str], int],
         si_map: dict[bytes, int],
     ) -> int:
         text = self.acq_name
@@ -4662,7 +4662,7 @@ class DataZippedBlock:
 
     def __setattr__(self, item: str, value: object) -> None:
         if item == "data" and not self._prevent_data_setitem:
-            data = value
+            data = typing.cast(bytes, value)
             original_size = len(data)
             self.original_size = original_size
 
@@ -5597,7 +5597,7 @@ class FileHistory:
             localtz = dateutil.tz.tzlocal()
             self.time_stamp = datetime.fromtimestamp(time.time(), tz=localtz)
 
-    def to_blocks(self, address: int, blocks: list[SupportsBytes], defined_texts: dict[Union[str, bytes], int]) -> int:
+    def to_blocks(self, address: int, blocks: list[SupportsBytes], defined_texts: dict[Union[bytes, str], int]) -> int:
         text = self.comment
         if text:
             if text in defined_texts:

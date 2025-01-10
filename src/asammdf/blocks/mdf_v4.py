@@ -11,6 +11,7 @@ from copy import deepcopy
 from datetime import datetime
 from functools import lru_cache
 from hashlib import md5
+from io import StringIO
 import logging
 from math import ceil, floor
 import mmap
@@ -66,7 +67,6 @@ from ..types import (
     ChannelsType,
     CompressionType,
     RasterType,
-    ReadableBufferType,
     StrPathType,
     WritableBufferType,
 )
@@ -184,6 +184,57 @@ class _Kwargs(CommonKwargs, total=False):
     column_storage: bool
 
 
+def debug_channel(
+    mdf: MDF4,
+    group: Group,
+    channel: Channel,
+    dependency: list[tuple[int, int]],
+    file: Optional[StringIO] = None,
+) -> None:
+    """use this to print debug information in case of errors
+
+    Parameters
+    ----------
+    mdf : MDF
+        source MDF object
+    group : dict
+        group
+    channel : Channel
+        channel object
+    dependency : ChannelDependency
+        channel dependency object
+
+    """
+    print("MDF", "=" * 76, file=file)
+    print("name:", mdf.name, file=file)
+    print("version:", mdf.version, file=file)
+    print("read fragment size:", mdf._read_fragment_size, file=file)
+    print("write fragment size:", mdf._write_fragment_size, file=file)
+    print()
+
+    record = mdf._prepare_record(group)
+    print("GROUP", "=" * 74, file=file)
+    print("sorted:", group["sorted"], file=file)
+    print("data location:", group["data_location"], file=file)
+    print("data blocks:", group.data_blocks, file=file)
+    print("dependencies", group["channel_dependencies"], file=file)
+    print("record:", record, file=file)
+    print(file=file)
+
+    cg = group["channel_group"]
+    print("CHANNEL GROUP", "=" * 66, file=file)
+    print(cg, cg.cycles_nr, cg.samples_byte_nr, cg.invalidation_bytes_nr, file=file)
+    print(file=file)
+
+    print("CHANNEL", "=" * 72, file=file)
+    print(channel, file=file)
+    print(file=file)
+
+    print("CHANNEL ARRAY", "=" * 66, file=file)
+    print(dependency, file=file)
+    print(file=file)
+
+
 class MDF4(MDF_Common):
     """The *header* attibute is a *HeaderBlock*.
 
@@ -270,7 +321,7 @@ class MDF4(MDF_Common):
 
     def __init__(
         self,
-        name: StrPathType | FileLike | None = None,
+        name: Optional[Union[str, os.PathLike[str], FileLike]] = None,
         version: Version = default_version,
         channels: list[str] | None = None,
         **kwargs: Unpack[_Kwargs],
@@ -828,7 +879,7 @@ class MDF4(MDF_Common):
         self,
         ch_addr: int,
         grp: Group,
-        stream: ReadableBufferType,
+        stream: Union[FileLike, mmap.mmap],
         dg_cntr: int,
         ch_cntr: int,
         channel_composition: bool = False,
@@ -1795,7 +1846,7 @@ class MDF4(MDF_Common):
     def _uses_ld(
         self,
         address: int,
-        stream: ReadableBufferType,
+        stream: Union[FileLike, mmap.mmap],
         block_type: bytes = b"##DT",
         mapped: bool = False,
     ) -> bool:
@@ -1846,7 +1897,7 @@ class MDF4(MDF_Common):
     def _get_data_blocks_info(
         self,
         address: int,
-        stream: ReadableBufferType,
+        stream: Union[FileLike, mmap.mmap],
         block_type: bytes = b"##DT",
         mapped: bool = False,
         total_size: int = 0,
@@ -2436,7 +2487,7 @@ class MDF4(MDF_Common):
     def _get_signal_data_blocks_info(
         self,
         address: int,
-        stream: ReadableBufferType,
+        stream: Union[FileLike, mmap.mmap],
     ) -> Iterator[SignalDataBlockInfo]:
         if not address:
             raise MdfException(f"Expected non-zero SDBLOCK address but got 0x{address:X}")
@@ -2585,7 +2636,7 @@ class MDF4(MDF_Common):
         self,
         group_index: int,
         channel: Channel,
-        fragment: tuple[bytes, int, int, ReadableBufferType | None],
+        fragment: tuple[bytes, int, int, Optional[Union[FileLike, mmap.mmap]]],
     ) -> NDArray[bool_]:
         """get invalidation indexes for the channel
 

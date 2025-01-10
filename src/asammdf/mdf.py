@@ -14,6 +14,7 @@ import gzip
 from io import BufferedIOBase, BytesIO
 import logging
 import os
+from os import PathLike
 from pathlib import Path
 import re
 from shutil import copy, move
@@ -27,6 +28,7 @@ import warnings
 from warnings import warn
 import xml.etree.ElementTree as ET
 import zipfile
+from zipfile import ZipFile
 
 from canmatrix import CanMatrix, Frame
 import numpy as np
@@ -41,6 +43,9 @@ from .blocks import v2_v3_constants as v23c
 from .blocks import v4_constants as v4c
 from .blocks.conversion_utils import from_dict
 from .blocks.mdf_common import CommonKwargs, Group, MdfKwargs
+from .blocks.mdf_v2 import MDF2
+from .blocks.mdf_v3 import MDF3
+from .blocks.mdf_v4 import MDF4
 from .blocks.options import FloatInterpolation, IntegerInterpolation
 from .blocks.source_utils import Source
 from .blocks.utils import (
@@ -52,7 +57,6 @@ from .blocks.utils import (
     FileLike,
     is_file_like,
     load_can_database,
-    master_using_raster,
     matlab_compatible,
     MDF2_VERSIONS,
     MDF3_VERSIONS,
@@ -190,6 +194,59 @@ class _ExportKwargs(_CsvKwargs, _MatKwargs, _ParquetKwargs, total=False):
     raw: bool
 
 
+def master_using_raster(mdf: Union[MDF2, MDF3, MDF4], raster: float, endpoint: bool = False) -> NDArray[Any]:
+    """get single master based on the raster
+
+    Parameters
+    ----------
+    mdf : asammdf.MDF
+        measurement object
+    raster : float
+        new raster
+    endpoint=False : bool
+        include maximum time stamp in the new master
+
+    Returns
+    -------
+    master : np.array
+        new master
+
+    """
+    if not raster:
+        master = np.array([], dtype="<f8")
+    else:
+        t_min = []
+        t_max = []
+        for group_index in mdf.virtual_groups:
+            group = mdf.groups[group_index]
+            cycles_nr = group.channel_group.cycles_nr
+            if cycles_nr:
+
+                master_min = mdf.get_master(group_index, record_offset=0, record_count=1)
+                if len(master_min):
+                    t_min.append(master_min[0])
+                master_max = mdf.get_master(group_index, record_offset=cycles_nr - 1, record_count=1)
+                if len(master_max):
+                    t_max.append(master_max[0])
+
+        if t_min:
+            t_min = np.amin(t_min)
+            t_max = np.amax(t_max)
+
+            num = float(np.float64((t_max - t_min) / raster))
+            if num.is_integer():
+                master = np.linspace(t_min, t_max, int(num) + 1)
+            else:
+                master = np.arange(t_min, t_max, raster)
+                if endpoint:
+                    master = np.concatenate([master, [t_max]])
+
+        else:
+            master = np.array([], dtype="<f8")
+
+    return master
+
+
 class MDF:
     r"""Unified access to MDF v3 and v4 files. Underlying _mdf's attributes and
     methods are linked to the `MDF` object via *setattr*. This is done to expose
@@ -256,12 +313,12 @@ class MDF:
 
     def __init__(
         self,
-        name: StrPathType | FileLike | zipfile.ZipFile | None = None,
+        name: Optional[Union[str, PathLike[str], FileLike, ZipFile]] = None,
         version: Version = "4.10",
         channels: list[str] | None = None,
         **kwargs: Unpack[MdfKwargs],
     ) -> None:
-        self._mdf: mdf_v2.MDF2 | mdf_v3.MDF3 | mdf_v4.MDF4
+        self._mdf: Union[MDF2, MDF3, MDF4]
         kwargs = typing.cast(CommonKwargs, kwargs)
 
         if "callback" in kwargs:
@@ -664,7 +721,7 @@ class MDF:
                 timestamp = trigger_info["time"]
                 group = trigger_info["group"]
 
-                if isinstance(self._mdf, (mdf_v2.MDF2, mdf_v3.MDF3)):
+                if isinstance(self._mdf, (MDF2, MDF3)):
                     self._mdf.add_trigger(
                         group,
                         timestamp,
@@ -1770,7 +1827,7 @@ class MDF:
                     # header information
                     group = hdf.create_group(str(filename))
 
-                    if isinstance(self._mdf, (mdf_v2.MDF2, mdf_v3.MDF3)):
+                    if isinstance(self._mdf, (MDF2, MDF3)):
                         for item in header_items:
                             group.attrs[item] = self._mdf.header[item].replace(b"\0", b"")
 
@@ -1828,7 +1885,7 @@ class MDF:
                     # header information
                     group = hdf.create_group(str(filename))
 
-                    if isinstance(self._mdf, (mdf_v2.MDF2, mdf_v3.MDF3)):
+                    if isinstance(self._mdf, (MDF2, MDF3)):
                         for item in header_items:
                             group.attrs[item] = self._mdf.header[item].replace(b"\0", b"")
 
@@ -6290,7 +6347,7 @@ class MDF:
         return channels
 
     def _asc_export(self, file_name):
-        if isinstance(self._mdf, (mdf_v2.MDF2, mdf_v3.MDF3)):
+        if isinstance(self._mdf, (MDF2, MDF3)):
             return
 
         groups_count = len(self._mdf.groups)

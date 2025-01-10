@@ -1,8 +1,8 @@
 """ ASAM MDF version 2 file format module """
 
+from os import PathLike
 from typing import Optional, Union
 
-from ..types import StrPathType
 from .mdf_v3 import MDF3, Version
 from .utils import FileLike, MdfException, validate_version_argument
 
@@ -17,7 +17,7 @@ class MDF2(MDF3):
 
     def __init__(
         self,
-        name: Optional[Union[StrPathType, FileLike]] = None,
+        name: Optional[Union[str, PathLike[str], FileLike]] = None,
         version: Version = default_version,
         **kwargs,
     ) -> None:

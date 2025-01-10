@@ -4,7 +4,6 @@ ASAM MDF version 4 file format module
 
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
-from io import StringIO
 import logging
 from os import PathLike
 from pathlib import Path
@@ -14,7 +13,7 @@ import numpy as np
 from numpy.typing import DTypeLike, NDArray
 from typing_extensions import Required, TypedDict
 
-from ..types import ChannelType, DbcFileType, MDF_v2_v3_v4, StrPathType
+from ..types import DbcFileType, StrPathType
 from . import v2_v3_blocks, v4_blocks
 from .utils import DataBlockInfo, EMPTY_TUPLE, MdfException, SignalDataBlockInfo
 
@@ -154,57 +153,6 @@ class Group(Generic[_DG, _CG, _CN]):
                     yield info
                 except StopIteration:
                     break
-
-
-def debug_channel(
-    mdf: MDF_v2_v3_v4,
-    group: Group,
-    channel: ChannelType,
-    dependency: list[tuple[int, int]],
-    file: Optional[StringIO] = None,
-) -> None:
-    """use this to print debug information in case of errors
-
-    Parameters
-    ----------
-    mdf : MDF
-        source MDF object
-    group : dict
-        group
-    channel : Channel
-        channel object
-    dependency : ChannelDependency
-        channel dependency object
-
-    """
-    print("MDF", "=" * 76, file=file)
-    print("name:", mdf.name, file=file)
-    print("version:", mdf.version, file=file)
-    print("read fragment size:", mdf._read_fragment_size, file=file)
-    print("write fragment size:", mdf._write_fragment_size, file=file)
-    print()
-
-    record = mdf._prepare_record(group)
-    print("GROUP", "=" * 74, file=file)
-    print("sorted:", group["sorted"], file=file)
-    print("data location:", group["data_location"], file=file)
-    print("data blocks:", group.data_blocks, file=file)
-    print("dependencies", group["channel_dependencies"], file=file)
-    print("record:", record, file=file)
-    print(file=file)
-
-    cg = group["channel_group"]
-    print("CHANNEL GROUP", "=" * 66, file=file)
-    print(cg, cg.cycles_nr, cg.samples_byte_nr, cg.invalidation_bytes_nr, file=file)
-    print(file=file)
-
-    print("CHANNEL", "=" * 72, file=file)
-    print(channel, file=file)
-    print(file=file)
-
-    print("CHANNEL ARRAY", "=" * 66, file=file)
-    print(dependency, file=file)
-    print(file=file)
 
 
 class MDF_Common:

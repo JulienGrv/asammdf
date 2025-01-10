@@ -134,7 +134,7 @@ class Channel:
       name
     * ``display_name_addr`` - int : address of TXBLOCK that contains the
       channel's display name
-    * ``aditional_byte_offset`` - int : additional Byte offset of the channel
+    * ``additional_byte_offset`` - int : additional Byte offset of the channel
       in the data record
 
     Other attributes
@@ -900,10 +900,6 @@ class ChannelConversionKwargs(BlockKwargs, total=False):
     formula: Union[bytes, str]
     ref_param_nr: int
     CANapeHiddenExtra: bytes
-    default_addr: bytes
-
-
-class _ReferencedBlocks(TypedDict, total=False):
     default_addr: bytes
 
 
@@ -2739,6 +2735,13 @@ class _HeaderBlockKwargs(BlockKwargs, total=False):
     version: str
 
 
+class _CommonProperties(TypedDict, total=False):
+    author: str
+    project: str
+    department: str
+    subject: str
+
+
 class HeaderBlock:
     """HDBLOCK class
 
@@ -2792,7 +2795,7 @@ class HeaderBlock:
 
         self.address = 64
         self.program = None
-        self._common_properties: dict[str, Union[str, dict[str, str]]] = {}
+        self._common_properties: _CommonProperties = {}
         self.description = ""
         self.comment = ""
         try:
@@ -2875,8 +2878,10 @@ class HeaderBlock:
                 tree = ET.SubElement(common, "tree", name=name)
                 for subname, subvalue in value.items():
                     ET.SubElement(tree, "e", name=subname).text = subvalue
-            else:
+            elif isinstance(value, str):
                 ET.SubElement(common, "e", name=name).text = value
+            else:
+                raise TypeError("value must be of type 'dict' or 'str'")
 
         return (
             ET.tostring(root, encoding="utf8", method="xml")
@@ -2886,7 +2891,7 @@ class HeaderBlock:
 
     @comment.setter
     def comment(self, string: str) -> None:
-        self._common_properties.clear()
+        self._common_properties = {}
 
         if string.startswith("<HDcomment"):
             comment = string
@@ -2906,12 +2911,12 @@ class HeaderBlock:
                     for e in common_properties:
                         if e.tag == "e":
                             name = e.attrib["name"]
-                            self._common_properties[name] = e.text or ""
+                            self._common_properties[name] = e.text or ""  # type: ignore[literal-required]
                         else:
                             name = e.attrib["name"]
                             subattibutes: dict[str, str] = {}
                             tree = e
-                            self._common_properties[name] = subattibutes
+                            self._common_properties[name] = subattibutes  # type: ignore[literal-required]
 
                             for e in tree:
                                 name = e.attrib["name"]
@@ -2921,7 +2926,7 @@ class HeaderBlock:
 
     @property
     def author(self) -> str:
-        return typing.cast(str, self._common_properties.get("author", ""))
+        return self._common_properties.get("author", "")
 
     @author.setter
     def author(self, value: str) -> None:
@@ -2929,7 +2934,7 @@ class HeaderBlock:
 
     @property
     def project(self) -> str:
-        return typing.cast(str, self._common_properties.get("project", ""))
+        return self._common_properties.get("project", "")
 
     @project.setter
     def project(self, value: str) -> None:
@@ -2937,7 +2942,7 @@ class HeaderBlock:
 
     @property
     def department(self) -> str:
-        return typing.cast(str, self._common_properties.get("department", ""))
+        return self._common_properties.get("department", "")
 
     @department.setter
     def department(self, value: str) -> None:
@@ -2945,7 +2950,7 @@ class HeaderBlock:
 
     @property
     def subject(self) -> str:
-        return typing.cast(str, self._common_properties.get("subject", ""))
+        return self._common_properties.get("subject", "")
 
     @subject.setter
     def subject(self, value: str) -> None:
@@ -3043,10 +3048,10 @@ class HeaderBlock:
         self.time = timestamp.strftime("%H:%M:%S").encode("ascii")
         if self.block_len > v23c.HEADER_COMMON_SIZE:
             if timestamp.tzinfo is None:
-                raise ValueError("timestamp.tzinfo is None")
+                raise ValueError("tzinfo is None")
             offset = timestamp.tzinfo.utcoffset(timestamp)
             if offset is None:
-                raise ValueError("offset is None")
+                raise ValueError("utcoffset is None")
             self.tz_offset = int(offset.total_seconds() / 3600)
             self.abs_time = int(timestamp.timestamp() * 10**9)
 

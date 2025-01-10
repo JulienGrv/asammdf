@@ -8,6 +8,7 @@ from functools import lru_cache
 import json
 import logging
 import mmap
+from os import PathLike
 from pathlib import Path
 from random import randint
 import re
@@ -32,11 +33,6 @@ import pandas as pd
 from pandas import Series
 from typing_extensions import Buffer, Literal, runtime_checkable, TypedDict, TypeIs
 
-from ..types import (
-    MDF_v2_v3_v4,
-    ReadableBufferType,
-    StrPathType,
-)
 from . import v2_v3_constants as v3c
 from . import v4_constants as v4c
 
@@ -254,7 +250,7 @@ def get_text_v3(
 
 def get_text_v3(
     address: int, stream: Union["FileLike", mmap.mmap], mapped: bool = False, decode: bool = True
-) -> Union[str, bytes]:
+) -> Union[bytes, str]:
     """faster way to extract strings from mdf versions 2 and 3 TextBlock
 
     Parameters
@@ -289,6 +285,7 @@ def get_text_v3(
         text_bytes = stream.read(size).split(b"\0", 1)[0].strip(b" \r\t\n")
 
     text: Union[bytes, str]
+
     if decode:
         try:
             text = text_bytes.decode("latin-1")
@@ -328,7 +325,7 @@ def get_text_v4(
 
 def get_text_v4(
     address: int, stream: Union["FileLike", mmap.mmap], mapped: bool = False, decode: bool = True
-) -> Union[str, bytes]:
+) -> Union[bytes, str]:
     """faster way to extract strings from mdf version 4 TextBlock
 
     Parameters
@@ -348,29 +345,36 @@ def get_text_v4(
     if address == 0:
         return "" if decode else b""
 
-    if isinstance(stream, mmap.mmap):
+    if stream_is_mmap(stream, mapped):
         block_id, size = BLK_COMMON_uf(stream, address)
         if block_id not in (b"##TX", b"##MD"):
             return "" if decode else b""
-        text = stream[address + 24 : address + size].split(b"\0", 1)[0].strip(b" \r\t\n")
+        text_bytes = stream[address + 24 : address + size].split(b"\0", 1)[0].strip(b" \r\t\n")
     else:
         stream.seek(address)
         block_id, size = BLK_COMMON_u(stream.read(24))
         if block_id not in (b"##TX", b"##MD"):
             return "" if decode else b""
-        text = stream.read(size - 24).split(b"\0", 1)[0].strip(b" \r\t\n")
+        text_bytes = stream.read(size - 24).split(b"\0", 1)[0].strip(b" \r\t\n")
+
+    text: Union[bytes, str]
 
     if decode:
         try:
-            return text.decode("utf-8")
+            text = text_bytes.decode("utf-8")
         except UnicodeDecodeError:
-            try:
-                encoding = detect(text)["encoding"]
-                return text.decode(encoding, "ignore")
-            except:
-                return "<!text_decode_error>"
+            encoding = detect(text_bytes)["encoding"]
+            if encoding:
+                try:
+                    text = text_bytes.decode(encoding, "ignore")
+                except:
+                    text = "<!text_decode_error>"
+            else:
+                text = "<!text_decode_error>"
     else:
-        return text
+        text = text_bytes
+
+    return text
 
 
 def sanitize_xml(text: str) -> str:
@@ -1510,59 +1514,6 @@ def downcast(array: NDArray[Any]) -> NDArray[Any]:
     return array
 
 
-def master_using_raster(mdf: MDF_v2_v3_v4, raster: float, endpoint: bool = False) -> NDArray[Any]:
-    """get single master based on the raster
-
-    Parameters
-    ----------
-    mdf : asammdf.MDF
-        measurement object
-    raster : float
-        new raster
-    endpoint=False : bool
-        include maximum time stamp in the new master
-
-    Returns
-    -------
-    master : np.array
-        new master
-
-    """
-    if not raster:
-        master = np.array([], dtype="<f8")
-    else:
-        t_min = []
-        t_max = []
-        for group_index in mdf.virtual_groups:
-            group = mdf.groups[group_index]
-            cycles_nr = group.channel_group.cycles_nr
-            if cycles_nr:
-
-                master_min = mdf.get_master(group_index, record_offset=0, record_count=1)
-                if len(master_min):
-                    t_min.append(master_min[0])
-                master_max = mdf.get_master(group_index, record_offset=cycles_nr - 1, record_count=1)
-                if len(master_max):
-                    t_max.append(master_max[0])
-
-        if t_min:
-            t_min = np.amin(t_min)
-            t_max = np.amax(t_max)
-
-            num = float(np.float64((t_max - t_min) / raster))
-            if num.is_integer():
-                master = np.linspace(t_min, t_max, int(num) + 1)
-            else:
-                master = np.arange(t_min, t_max, raster)
-                if endpoint:
-                    master = np.concatenate([master, [t_max]])
-
-        else:
-            master = np.array([], dtype="<f8")
-
-    return master
-
-
 def csv_int2bin(val) -> str:
     """format CAN id as bin
 
@@ -1596,12 +1547,14 @@ def csv_bytearray2hex(val: NDArray[Any], size: Optional[int] = None) -> str:
 
     """
     if size is not None:
-        return val.tobytes()[:size].hex(" ", 1).upper()
+        hex_val = val.tobytes()[:size].hex(" ", 1).upper()
     else:
         try:
-            return val.tobytes().hex(" ", 1).upper()
+            hex_val = val.tobytes().hex(" ", 1).upper()
         except:
-            return "●"
+            hex_val = "●"
+
+    return hex_val
 
 
 csv_bytearray2hex = np.vectorize(csv_bytearray2hex, otypes=[str])
@@ -1624,7 +1577,9 @@ def pandas_query_compatible(name: str) -> str:
     return name
 
 
-def load_can_database(path: StrPathType, contents: Optional[Union[bytes, str]] = None, **kwargs) -> Optional[CanMatrix]:
+def load_can_database(
+    path: Union[str, PathLike[str]], contents: Optional[Union[bytes, str]] = None, **kwargs
+) -> Optional[CanMatrix]:
     """
 
 
@@ -1706,7 +1661,7 @@ def load_can_database(path: StrPathType, contents: Optional[Union[bytes, str]] =
     return can_matrix
 
 
-def all_blocks_addresses(obj: ReadableBufferType):
+def all_blocks_addresses(obj: Union[FileLike, mmap.mmap]):
     DG = "DG\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00"
     others = "(D[VTZIL]|AT|C[AGHNC]|EV|FH|HL|LD|MD|R[DVI]|S[IRD]|TX)\x00\x00\x00\x00"
     pattern = re.compile(
