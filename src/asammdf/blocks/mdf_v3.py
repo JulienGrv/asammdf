@@ -1,7 +1,5 @@
 """ ASAM MDF version 3 file format module """
 
-from __future__ import annotations
-
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from copy import deepcopy
@@ -51,7 +49,7 @@ from . import v2_v3_constants as v23c
 from .conversion_utils import conversion_transfer
 from .cutils import data_block_from_arrays, get_channel_raw_bytes
 from .mdf_common import BusInfo, CommonKwargs, MDF_Common
-from .options import get_global_option
+from .options import GLOBAL_OPTIONS
 from .source_utils import Source
 from .utils import (
     as_non_byte_sized_signed_int,
@@ -191,7 +189,7 @@ class MDF3(MDF_Common):
         self,
         name: Optional[Union[str, os.PathLike[str], FileLike]] = None,
         version: Version = default_version,
-        channels: list[str] | None = None,
+        channels: Optional[list[str]] = None,
         **kwargs: Unpack[_Kwargs],
     ) -> None:
         if not kwargs.get("__internal__", False):
@@ -210,14 +208,14 @@ class MDF3(MDF_Common):
             self.load_filter = set(channels)
             self.use_load_filter = True
 
-        self.temporary_folder = kwargs.get("temporary_folder", get_global_option("temporary_folder"))
+        self.temporary_folder = kwargs.get("temporary_folder", GLOBAL_OPTIONS["temporary_folder"])
 
         self.groups: list[Group] = []
         self.channels_db = ChannelsDB()
-        self.masters_db = {}
+        self.masters_db: dict[int, int] = {}
         self.version: str = version
 
-        self._master_channel_metadata = {}
+        self._master_channel_metadata: dict[int, tuple[str, int]] = {}
         self._closed = False
 
         self._tempfile = NamedTemporaryFile(dir=self.temporary_folder)
@@ -227,32 +225,30 @@ class MDF3(MDF_Common):
 
         self._remove_source_from_channel_names = kwargs.get("remove_source_from_channel_names", False)
 
-        self._read_fragment_size = get_global_option("read_fragment_size")
-        self._write_fragment_size = get_global_option("write_fragment_size")
-        self._single_bit_uint_as_bool = get_global_option("single_bit_uint_as_bool")
-        self._integer_interpolation = get_global_option("integer_interpolation")
-        self._float_interpolation = get_global_option("float_interpolation")
+        self._read_fragment_size = GLOBAL_OPTIONS["read_fragment_size"]
+        self._write_fragment_size = GLOBAL_OPTIONS["write_fragment_size"]
+        self._single_bit_uint_as_bool = GLOBAL_OPTIONS["single_bit_uint_as_bool"]
+        self._integer_interpolation = GLOBAL_OPTIONS["integer_interpolation"]
+        self._float_interpolation = GLOBAL_OPTIONS["float_interpolation"]
         self._raise_on_multiple_occurrences = kwargs.get(
-            "raise_on_multiple_occurrences",
-            get_global_option("raise_on_multiple_occurrences"),
+            "raise_on_multiple_occurrences", GLOBAL_OPTIONS["raise_on_multiple_occurrences"]
         )
-        self._use_display_names = kwargs.get("use_display_names", get_global_option("use_display_names"))
+        self._use_display_names = kwargs.get("use_display_names", GLOBAL_OPTIONS["use_display_names"])
         self._fill_0_for_missing_computation_channels = kwargs.get(
-            "fill_0_for_missing_computation_channels",
-            get_global_option("fill_0_for_missing_computation_channels"),
+            "fill_0_for_missing_computation_channels", GLOBAL_OPTIONS["fill_0_for_missing_computation_channels"]
         )
         self.copy_on_get = False
 
-        self._si_map = {}
-        self._cc_map = {}
+        self._si_map: dict[Union[bytes, int], ChannelExtension] = {}
+        self._cc_map: dict[Union[bytes, int], ChannelConversion] = {}
 
         self.last_call_info: BusInfo = {}
-        self._master = None
+        self._master: Optional[NDArray[Any]] = None
 
-        self.virtual_groups_map = {}
-        self.virtual_groups = {}
+        self.virtual_groups_map: dict[int, int] = {}
+        self.virtual_groups: dict[int, VirtualChannelGroup] = {}
 
-        self.vlsd_max_length = {}
+        self.vlsd_max_length: dict[tuple[str, int], int] = {}
 
         self._delete_on_close = False
 
@@ -314,8 +310,8 @@ class MDF3(MDF_Common):
         self,
         group: Group,
         record_offset: int = 0,
-        record_count: int | None = None,
-    ) -> Iterator[tuple[bytes, int, int | None]]:
+        record_count: Optional[int] = None,
+    ) -> Iterator[tuple[bytes, int, Optional[int]]]:
         """get group's data block bytes"""
         has_yielded = False
         offset = 0
@@ -365,7 +361,7 @@ class MDF3(MDF_Common):
                 blocks = iter(group.data_blocks)
 
                 cur_size = 0
-                data_list = []
+                data_list: list[bytes] = []
 
                 while True:
                     try:
@@ -785,9 +781,9 @@ class MDF3(MDF_Common):
                                 block_len,
                                 next_ch_addr,
                                 channel_type,
-                                name,
+                                name_bytes,
                             ) = v23c.CHANNEL_FILTER_uf(stream, ch_addr)
-                            name = name.decode("latin-1").strip(" \t\n\r\0")
+                            name = name_bytes.decode("latin-1").strip(" \t\n\r\0")
                             if block_len >= v23c.CN_LONGNAME_BLOCK_SIZE:
                                 tx_address = v23c.UINT32_uf(stream, ch_addr + v23c.CN_SHORT_BLOCK_SIZE)[0]
                                 if tx_address:
@@ -806,9 +802,9 @@ class MDF3(MDF_Common):
                                 block_len,
                                 next_ch_addr,
                                 channel_type,
-                                name,
+                                name_bytes,
                             ) = v23c.CHANNEL_FILTER_u(stream.read(v23c.CHANNEL_FILTER_SIZE))
-                            name = name.decode("latin-1").strip(" \t\n\r\0")
+                            name = name_bytes.decode("latin-1").strip(" \t\n\r\0")
 
                             if block_len >= v23c.CN_LONGNAME_BLOCK_SIZE:
                                 stream.seek(ch_addr + v23c.CN_SHORT_BLOCK_SIZE)
@@ -824,7 +820,7 @@ class MDF3(MDF_Common):
                                         }
 
                         if id_ != b"CN":
-                            message = f'Expected "CN" block @{hex(ch_addr)} but found "{id_}"'
+                            message = f'Expected "CN" block @{hex(ch_addr)} but found "{id_!r}"'
                             raise MdfException(message)
 
                         if self._remove_source_from_channel_names:

@@ -31,7 +31,7 @@ __all__ = ["MDF_Common"]
 
 
 class MdfKwargs(TypedDict, total=False):
-    temporary_folder: Optional[Union[str, PathLike[str]]]
+    temporary_folder: Optional[Union[str, bytes, PathLike[str], PathLike[bytes]]]
     raise_on_multiple_occurrences: bool
     use_display_names: bool
     fill_0_for_missing_computation_channels: bool

@@ -230,10 +230,32 @@ def matlab_compatible(name: str) -> str:
     return compatible_name[:60]
 
 
+@runtime_checkable
+class FileLike(Protocol):
+    @property
+    def name(self) -> str: ...
+    def __iter__(self) -> Iterator[bytes]: ...
+    def close(self) -> None: ...
+    def read(self, size: Optional[int] = -1, /) -> bytes: ...
+    def seek(self, target: int, whence: int = 0, /) -> int: ...
+    def tell(self) -> int: ...
+    def write(self, buffer: Buffer, /) -> int: ...
+
+
+class BlockKwargs(TypedDict, total=False):
+    stream: Union[FileLike, mmap.mmap]
+    mapped: bool
+    address: int
+
+
+def stream_is_mmap(stream: Union[FileLike, mmap.mmap], mapped: bool) -> TypeIs[mmap.mmap]:
+    return mapped
+
+
 @overload
 def get_text_v3(
     address: int,
-    stream: Union["FileLike", mmap.mmap],
+    stream: Union[FileLike, mmap.mmap],
     mapped: bool = ...,
     decode: Literal[True] = ...,
 ) -> str: ...
@@ -242,14 +264,14 @@ def get_text_v3(
 @overload
 def get_text_v3(
     address: int,
-    stream: Union["FileLike", mmap.mmap],
+    stream: Union[FileLike, mmap.mmap],
     mapped: bool = ...,
     decode: Literal[False] = ...,
 ) -> bytes: ...
 
 
 def get_text_v3(
-    address: int, stream: Union["FileLike", mmap.mmap], mapped: bool = False, decode: bool = True
+    address: int, stream: Union[FileLike, mmap.mmap], mapped: bool = False, decode: bool = True
 ) -> Union[bytes, str]:
     """faster way to extract strings from mdf versions 2 and 3 TextBlock
 
@@ -307,7 +329,7 @@ def get_text_v3(
 @overload
 def get_text_v4(
     address: int,
-    stream: Union["FileLike", mmap.mmap],
+    stream: Union[FileLike, mmap.mmap],
     mapped: bool = ...,
     decode: Literal[True] = ...,
 ) -> str: ...
@@ -316,7 +338,7 @@ def get_text_v4(
 @overload
 def get_text_v4(
     address: int,
-    stream: Union["FileLike", mmap.mmap],
+    stream: Union[FileLike, mmap.mmap],
     mapped: bool = ...,
     *,
     decode: Literal[False],
@@ -324,7 +346,7 @@ def get_text_v4(
 
 
 def get_text_v4(
-    address: int, stream: Union["FileLike", mmap.mmap], mapped: bool = False, decode: bool = True
+    address: int, stream: Union[FileLike, mmap.mmap], mapped: bool = False, decode: bool = True
 ) -> Union[bytes, str]:
     """faster way to extract strings from mdf version 4 TextBlock
 
@@ -864,7 +886,7 @@ def as_non_byte_sized_signed_int(integer_array: NDArray[Any], bit_length: int) -
 
 
 def count_channel_groups(
-    stream: Union["FileLike", mmap.mmap], include_channels: bool = False, mapped: bool = False
+    stream: Union[FileLike, mmap.mmap], include_channels: bool = False, mapped: bool = False
 ) -> tuple[int, int]:
     """count all channel groups as fast as possible. This is used to provide
     reliable progress information when loading a file using the GUI
@@ -901,7 +923,7 @@ def count_channel_groups(
             raise MdfException(f'"{stream.name if is_file_like(stream) else stream}" is not a valid MDF file')
 
     if version >= 4:
-        if mapped:
+        if stream_is_mmap(stream, mapped):
             dg_addr = UINT64_uf(stream, 88)[0]
             while dg_addr:
                 stream.seek(dg_addr + 32)
@@ -1076,17 +1098,6 @@ def randomized_string(size: int) -> bytes:
     return bytes(randint(65, 90) for _ in range(size - 1)) + b"\0"
 
 
-@runtime_checkable
-class FileLike(Buffer, Iterator[bytes], Protocol):
-    @property
-    def name(self) -> str: ...
-    def close(self) -> None: ...
-    def read(self, n: int = -1) -> bytes: ...
-    def seek(self, offset: int, whence: int = 0) -> int: ...
-    def tell(self) -> int: ...
-    def write(self, s: Union[bytes, bytearray]) -> int: ...
-
-
 def is_file_like(obj: object) -> TypeIs[FileLike]:
     """
     Check if the object is a file-like object.
@@ -1116,16 +1127,6 @@ def is_file_like(obj: object) -> TypeIs[FileLike]:
     False
     """
     return isinstance(obj, FileLike)
-
-
-class BlockKwargs(TypedDict, total=False):
-    stream: Union[FileLike, mmap.mmap]
-    mapped: bool
-    address: int
-
-
-def stream_is_mmap(stream: Union[FileLike, mmap.mmap], mapped: bool) -> TypeIs[mmap.mmap]:
-    return mapped
 
 
 class UniqueDB:
@@ -1702,10 +1703,10 @@ def all_blocks_addresses(obj: Union[FileLike, mmap.mmap]) -> tuple[dict[int, byt
     except:
         pass
 
-    source: Buffer
+    source: Union[Buffer, bytes]
     try:
-        re.search(pattern, obj)
-        source = obj
+        re.search(pattern, obj)  # type: ignore[arg-type]
+        source = typing.cast(Buffer, obj)
     except TypeError:
         source = obj.read()
 

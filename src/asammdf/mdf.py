@@ -2859,7 +2859,7 @@ class MDF:
             reorder_channel_groups = False
             cg_translations: dict[int, int] = {}
 
-            vlsd_max_length = {}
+            vlsd_max_length: dict[tuple[str, int], int] = {}
 
             if mdf_index == 0:
                 last_timestamps = [None for gp in mdf._mdf.virtual_groups]
