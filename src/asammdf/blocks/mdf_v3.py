@@ -952,9 +952,9 @@ class MDF3(MDF_Common):
     def _filter_occurrences(
         self,
         occurrences: Sequence[tuple[int, int]],
-        source_name: str | None = None,
-        source_path: str | None = None,
-        acq_name: str | None = None,
+        source_name: Optional[str] = None,
+        source_path: Optional[str] = None,
+        acq_name: Optional[str] = None,
     ) -> Iterator[tuple[int, int]]:
         if source_name is not None:
             occurrences = (
@@ -1065,10 +1065,10 @@ class MDF3(MDF_Common):
     @overload
     def append(
         self,
-        signals: list[Signal] | Signal,
+        signals: Union[list[Signal], Signal],
         comment: str = ...,
         common_timebase: bool = ...,
-        units: dict[str, str | bytes] | None = ...,
+        units: Optional[dict[str, Union[bytes, str]]] = ...,
     ) -> int: ...
 
     @overload
@@ -1077,16 +1077,16 @@ class MDF3(MDF_Common):
         signals: DataFrame,
         comment: str = ...,
         common_timebase: bool = ...,
-        units: dict[str, str | bytes] | None = ...,
+        units: Optional[dict[str, Union[bytes, str]]] = ...,
     ) -> None: ...
 
     def append(
         self,
-        signals: list[Signal] | Signal | DataFrame,
+        signals: Union[list[Signal], Signal, DataFrame],
         comment: str = "Python",
         common_timebase: bool = False,
-        units: dict[str, str | bytes] | None = None,
-    ) -> int | None:
+        units: Optional[dict[str, Union[bytes, str]]] = None,
+    ) -> Optional[int]:
         """Appends a new data group.
 
         For channel dependencies type Signals, the *samples* attribute must be
@@ -2110,7 +2110,7 @@ class MDF3(MDF_Common):
         self,
         df: DataFrame,
         comment: str = "",
-        units: dict[str, str] | None = None,
+        units: Optional[dict[str, str]] = None,
     ) -> None:
         """
         Appends a new data group from a Pandas data frame.
@@ -2406,7 +2406,7 @@ class MDF3(MDF_Common):
         except:
             print(format_exc())
 
-    def extend(self, index: int, signals: list[tuple[NDArray[Any], NDArray[Any] | None]]) -> None:
+    def extend(self, index: int, signals: list[tuple[NDArray[Any], Optional[NDArray[Any]]]]) -> None:
         """
         Extend a group with new samples. *signals* contains (values, invalidation_bits)
         pairs for each extended signal. Since MDF3 does not support invalidation
@@ -2608,9 +2608,9 @@ class MDF3(MDF_Common):
 
     def get_channel_metadata(
         self,
-        name: str | None = None,
-        group: int | None = None,
-        index: int | None = None,
+        name: Optional[str] = None,
+        group: Optional[int] = None,
+        index: Optional[int] = None,
     ) -> Channel:
         gp_nr, ch_nr = self._validate_channel_selection(name, group, index)
 
@@ -2623,9 +2623,9 @@ class MDF3(MDF_Common):
 
     def get_channel_unit(
         self,
-        name: str | None = None,
-        group: int | None = None,
-        index: int | None = None,
+        name: Optional[str] = None,
+        group: Optional[int] = None,
+        index: Optional[int] = None,
     ) -> str:
         """Gets channel unit.
 
@@ -2676,9 +2676,9 @@ class MDF3(MDF_Common):
 
     def get_channel_comment(
         self,
-        name: str | None = None,
-        group: int | None = None,
-        index: int | None = None,
+        name: Optional[str] = None,
+        group: Optional[int] = None,
+        index: Optional[int] = None,
     ) -> str:
         """Gets channel comment.
         Channel can be specified in two ways:
@@ -2724,61 +2724,61 @@ class MDF3(MDF_Common):
     @overload
     def get(
         self,
-        name: str | None = ...,
-        group: int | None = ...,
-        index: int | None = ...,
-        raster: RasterType | None = ...,
+        name: Optional[str] = ...,
+        group: Optional[int] = ...,
+        index: Optional[int] = ...,
+        raster: Optional[RasterType] = ...,
         samples_only: Literal[False] = ...,
-        data: tuple[bytes, int, int | None] | None = ...,
+        data: Optional[tuple[bytes, int, Optional[int]]] = ...,
         raw: bool = ...,
         record_offset: int = ...,
-        record_count: int | None = ...,
+        record_count: Optional[int] = ...,
         skip_channel_validation: bool = ...,
     ) -> Signal: ...
 
     @overload
     def get(
         self,
-        name: str | None = ...,
-        group: int | None = ...,
-        index: int | None = ...,
-        raster: RasterType | None = ...,
+        name: Optional[str] = ...,
+        group: Optional[int] = ...,
+        index: Optional[int] = ...,
+        raster: Optional[RasterType] = ...,
         samples_only: Literal[True] = ...,
-        data: tuple[bytes, int, int | None] | None = ...,
+        data: Optional[tuple[bytes, int, Optional[int]]] = ...,
         raw: bool = ...,
         record_offset: int = ...,
-        record_count: int | None = ...,
+        record_count: Optional[int] = ...,
         skip_channel_validation: bool = ...,
     ) -> tuple[NDArray[Any], None]: ...
 
     @overload
     def get(
         self,
-        name: str | None = ...,
-        group: int | None = ...,
-        index: int | None = ...,
-        raster: RasterType | None = ...,
+        name: Optional[str] = ...,
+        group: Optional[int] = ...,
+        index: Optional[int] = ...,
+        raster: Optional[RasterType] = ...,
         samples_only: bool = ...,
-        data: tuple[bytes, int, int | None] | None = ...,
+        data: Optional[tuple[bytes, int, Optional[int]]] = ...,
         raw: bool = ...,
         record_offset: int = ...,
-        record_count: int | None = ...,
+        record_count: Optional[int] = ...,
         skip_channel_validation: bool = ...,
-    ) -> Signal | tuple[NDArray[Any], None]: ...
+    ) -> Union[Signal, tuple[NDArray[Any], None]]: ...
 
     def get(
         self,
-        name: str | None = None,
-        group: int | None = None,
-        index: int | None = None,
-        raster: RasterType | None = None,
+        name: Optional[str] = None,
+        group: Optional[int] = None,
+        index: Optional[int] = None,
+        raster: Optional[RasterType] = None,
         samples_only: bool = False,
-        data: tuple[bytes, int, int | None] | None = None,
+        data: Optional[tuple[bytes, int, Optional[int]]] = None,
         raw: bool = False,
         record_offset: int = 0,
-        record_count: int | None = None,
+        record_count: Optional[int] = None,
         skip_channel_validation: bool = False,
-    ) -> Signal | tuple[NDArray[Any], None]:
+    ) -> Union[Signal, tuple[NDArray[Any], None]]:
         """Gets channel samples.
         Channel can be specified in two ways:
 
@@ -3178,10 +3178,10 @@ class MDF3(MDF_Common):
     def get_master(
         self,
         index: int,
-        data: tuple[bytes, int, int | None] | None = None,
-        raster: RasterType | None = None,
+        data: Optional[tuple[bytes, int, Optional[int]]] = None,
+        raster: Optional[RasterType] = None,
         record_offset: int = 0,
-        record_count: int | None = None,
+        record_count: Optional[int] = None,
         one_piece: bool = False,
     ) -> NDArray[Any]:
         """returns master channel samples for given group
@@ -3757,8 +3757,8 @@ class MDF3(MDF_Common):
 
     def included_channels(
         self,
-        index: int | None = None,
-        channels: ChannelsType | None = None,
+        index: Optional[int] = None,
+        channels: Optional[ChannelsType] = None,
         skip_master: bool = True,
         minimal: bool = True,
     ) -> dict[int, dict[int, list[int]]]:
@@ -3836,9 +3836,9 @@ class MDF3(MDF_Common):
     def _yield_selected_signals(
         self,
         index: int,
-        groups: dict[int, list[int]] | None = None,
+        groups: Optional[dict[int, list[int]]] = None,
         record_offset: int = 0,
-        record_count: int | None = None,
+        record_count: Optional[int] = None,
         skip_master: bool = True,
         version: str = "4.20",
     ) -> Iterator[Union[list[Signal], list[tuple[NDArray[Any], None]]]]:
