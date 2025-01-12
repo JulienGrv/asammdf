@@ -107,7 +107,7 @@ class Group(Generic[_DG, _CG, _CN]):
         self.record_size: dict[int, int] = {}
         self.trigger: Optional[v3b.TriggerBlock] = None
         self.sorted: bool
-        self.string_dtypes: list[DTypeLike] = []
+        self.string_dtypes: DTypeLike = []
         self.data_blocks: list[DataBlockInfo] = []
         self.signal_types: list[int]
         self.single_channel_dtype = None

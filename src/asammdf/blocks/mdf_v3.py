@@ -74,6 +74,7 @@ from .v2_v3_blocks import (
     ChannelConversion,
     ChannelConversionKwargs,
     ChannelDependency,
+    ChannelDependencyKwargs,
     ChannelExtension,
     ChannelExtensionKwargs,
     ChannelGroup,
@@ -217,7 +218,7 @@ class MDF3(MDF_Common):
         self.masters_db: dict[int, int] = {}
         self.version: str = version
 
-        self._master_channel_metadata: dict[int, tuple[str, int]] = {}
+        self._master_channel_metadata: dict[int, tuple[str, Literal[1]]] = {}
         self._closed = False
 
         self._tempfile = NamedTemporaryFile(dir=self.temporary_folder)
@@ -1219,7 +1220,7 @@ class MDF3(MDF_Common):
 
         cycles_nr = len(timestamps)
         fields = []
-        types = []
+        types: DTypeLike = []
         ch_cntr = 0
         offset = 0
         field_names = UniqueDB()
@@ -1241,9 +1242,8 @@ class MDF3(MDF_Common):
                 "min_phy_value": timestamps[0] if cycles_nr else 0,
                 "max_phy_value": timestamps[-1] if cycles_nr else 0,
             }
-            conversion = ChannelConversion(**cc_kargs)
-            conversion.unit = "s"
-            source = ce_block
+            cc_block = ChannelConversion(**cc_kargs)
+            cc_block.unit = "s"
 
             # time channel
             t_type, t_size = fmt_to_datatype_v3(timestamps.dtype, timestamps.shape)
@@ -1259,8 +1259,8 @@ class MDF3(MDF_Common):
             }
             channel = Channel(**cn_kargs)
             channel.name = name = time_name
-            channel.conversion = conversion
-            channel.source = source
+            channel.conversion = cc_block
+            channel.source = ce_block
 
             gp_channels.append(channel)
 
@@ -1305,13 +1305,15 @@ class MDF3(MDF_Common):
 
             # conversions for channel
 
-            conversion = conversion_transfer(signal.conversion)
-            conversion.unit = unit = signal.unit
+            cc_block = conversion_transfer(signal.conversion)
+            cc_block.unit = unit = signal.unit
 
             israw = signal.raw
 
             if not israw and not unit:
                 conversion = None
+            else:
+                conversion = cc_block
 
             if sig_type == v23c.SIGNAL_TYPE_SCALAR:
                 # source for channel
@@ -1361,7 +1363,6 @@ class MDF3(MDF_Common):
                     "bit_count": s_size_,
                     "additional_byte_offset": additional_byte_offset,
                     "block_len": channel_size,
-                    "version": version,
                 }
 
                 s_size = max(s_size, 8)
@@ -1375,14 +1376,16 @@ class MDF3(MDF_Common):
                 gp_channels.append(channel)
 
                 if len(signal.samples.shape) > 1:
-                    channel.dtype_fmt = dtype((signal.samples.dtype, signal.samples.shape[1:]))
+                    dtype_fmt = dtype((signal.samples.dtype, signal.samples.shape[1:]))
                 else:
-                    channel.dtype_fmt = signal.samples.dtype
+                    dtype_fmt = signal.samples.dtype
+
+                channel.dtype_fmt = dtype_fmt
 
                 record.append(
                     (
-                        channel.dtype_fmt,
-                        channel.dtype_fmt.itemsize,
+                        dtype_fmt,
+                        dtype_fmt.itemsize,
                         offset // 8,
                         0,
                     )
@@ -1417,15 +1420,17 @@ class MDF3(MDF_Common):
                 v23c.SIGNAL_TYPE_STRUCTURE_COMPOSITION,
             ):
                 new_dg_cntr = len(self.groups)
-                new_gp = Group(None)
+                new_gp = Group(DataGroup())
                 new_gp.channels = new_gp_channels = []
-                new_gp.channel_dependencies = new_gp_dep = []
+                new_gp_dep: list[Optional[ChannelDependency]] = []
+                new_gp.channel_dependencies = new_gp_dep
                 new_gp.signal_types = new_gp_sig_types = []
-                new_gp.record = new_record = []
+                new_record: list[Optional[tuple[np.dtype[Any], int, int, int]]] = []
+                new_gp.record = new_record
                 self.groups.append(new_gp)
 
                 new_fields = []
-                new_types = []
+                new_types: DTypeLike = []
                 new_ch_cntr = 0
                 new_offset = 0
                 new_field_names = UniqueDB()
@@ -1437,10 +1442,8 @@ class MDF3(MDF_Common):
                     "min_phy_value": timestamps[0] if cycles_nr else 0,
                     "max_phy_value": timestamps[-1] if cycles_nr else 0,
                 }
-                conversion = ChannelConversion(**cc_kargs)
-                conversion.unit = "s"
-
-                source = ce_block
+                cc_block = ChannelConversion(**cc_kargs)
+                cc_block.unit = "s"
 
                 # time channel
                 t_type, t_size = fmt_to_datatype_v3(timestamps.dtype, timestamps.shape)
@@ -1453,12 +1456,11 @@ class MDF3(MDF_Common):
                     "max_raw_value": timestamps[-1] if cycles_nr else 0,
                     "bit_count": t_size,
                     "block_len": channel_size,
-                    "version": version,
                 }
                 channel = Channel(**cn_kargs)
                 channel.name = name = time_name
-                channel.source = source
-                channel.conversion = conversion
+                channel.source = ce_block
+                channel.conversion = cc_block
                 new_gp_channels.append(channel)
 
                 new_record.append(
@@ -1522,7 +1524,7 @@ class MDF3(MDF_Common):
                         "min_phy_value": 0,
                         "max_phy_value": 0,
                     }
-                    conversion = ChannelConversion(**cc_kargs)
+                    cc_block = ChannelConversion(**cc_kargs)
 
                     # source for channel
                     if signal.source:
@@ -1540,10 +1542,7 @@ class MDF3(MDF_Common):
                                 "sender_name": source.path.encode("latin-1"),
                             }
 
-                        source = ChannelExtension(**ce_kargs)
-
-                    else:
-                        source = ce_block
+                        ce_block = ChannelExtension(**ce_kargs)
 
                     # compute additional byte offset for large records size
                     if new_offset > v23c.MAX_UINT16:
@@ -1561,15 +1560,14 @@ class MDF3(MDF_Common):
                         "bit_count": s_size,
                         "additional_byte_offset": additional_byte_offset,
                         "block_len": channel_size,
-                        "version": version,
                     }
 
                     s_size = max(s_size, 8)
 
                     channel = Channel(**cn_kargs)
                     channel.name = name
-                    channel.source = source
-                    channel.conversion = conversion
+                    channel.source = ce_block
+                    channel.conversion = cc_block
 
                     new_gp_channels.append(channel)
                     new_offset += s_size
@@ -1587,7 +1585,7 @@ class MDF3(MDF_Common):
                     new_gp_dep.append(None)
 
                 # channel group
-                cg_kargs = {
+                cg_kargs: ChannelGroupKwargs = {
                     "cycles_nr": cycles_nr,
                     "samples_byte_nr": new_offset // 8,
                     "ch_nr": new_ch_cntr,
@@ -1651,7 +1649,7 @@ class MDF3(MDF_Common):
 
             else:
                 new_dg_cntr = len(self.groups)
-                new_gp = Group(None)
+                new_gp = Group(DataGroup())
                 new_gp.channels = new_gp_channels = []
                 new_gp.channel_dependencies = new_gp_dep = []
                 new_gp.signal_types = new_gp_sig_types = []
@@ -1683,15 +1681,15 @@ class MDF3(MDF_Common):
                         subarray = subarray[:, idx]
                     component_samples.append(subarray)
 
-                    indexes = "".join(f"[{idx}]" for idx in indexes)
-                    component_name = f"{name}{indexes}"
+                    indexes_str = "".join(f"[{idx}]" for idx in indexes)
+                    component_name = f"{name}{indexes_str}"
                     component_names.append(component_name)
 
                 # add channel dependency block for composed parent channel
                 sd_nr = len(component_samples)
-                cd_kargs = {"sd_nr": sd_nr}
+                cd_kargs: ChannelDependencyKwargs = {"sd_nr": sd_nr}
                 for i, dim in enumerate(shape[::-1]):
-                    cd_kargs[f"dim_{i}"] = dim
+                    cd_kargs[f"dim_{i}"] = dim  # type: ignore[literal-required]
                 parent_dep = ChannelDependency(**cd_kargs)
                 new_gp_dep.append(parent_dep)
 
@@ -1711,10 +1709,7 @@ class MDF3(MDF_Common):
                             "sender_name": source.path.encode("latin-1"),
                         }
 
-                    source = ChannelExtension(**ce_kargs)
-
-                else:
-                    source = ce_block
+                    ce_block = ChannelExtension(**ce_kargs)
 
                 s_type, s_size = fmt_to_datatype_v3(samples.dtype, (), True)
                 # compute additional byte offset for large records size
@@ -1732,7 +1727,6 @@ class MDF3(MDF_Common):
                     "bit_count": s_size,
                     "additional_byte_offset": additional_byte_offset,
                     "block_len": channel_size,
-                    "version": version,
                 }
 
                 s_size = max(s_size, 8)
@@ -1755,8 +1749,8 @@ class MDF3(MDF_Common):
                         parent_dep.referenced_channels.append(dep_pair)
                         description = b"\0"
                     else:
-                        description = f"{signal.name} - axis {name}"
-                        description = description.encode("latin-1")
+                        description_str = f"{signal.name} - axis {name}"
+                        description = description_str.encode("latin-1")
 
                     s_type, s_size = fmt_to_datatype_v3(samples.dtype, ())
                     shape = samples.shape[1:]
@@ -1777,9 +1771,7 @@ class MDF3(MDF_Common):
                                 "sender_name": source.path.encode("latin-1"),
                             }
 
-                        source = ChannelExtension(**ce_kargs)
-                    else:
-                        source = ce_block
+                        ce_block = ChannelExtension(**ce_kargs)
 
                     # compute additional byte offset for large records size
                     if new_offset > v23c.MAX_UINT16:
@@ -1806,14 +1798,13 @@ class MDF3(MDF_Common):
                         "additional_byte_offset": additional_byte_offset,
                         "block_len": channel_size,
                         "description": description,
-                        "version": version,
                     }
 
                     s_size = max(s_size, 8)
 
                     channel = Channel(**cn_kargs)
                     channel.name = name
-                    channel.source = source
+                    channel.source = ce_block
                     new_gp_channels.append(channel)
 
                     size = s_size
@@ -1847,15 +1838,15 @@ class MDF3(MDF_Common):
                             subarray = subarray[:, idx]
                         component_samples.append(subarray)
 
-                        indexes = "".join(f"[{idx}]" for idx in indexes)
-                        component_name = f"{name}{indexes}"
+                        indexes_str = "".join(f"[{idx}]" for idx in indexes)
+                        component_name = f"{name}{indexes_str}"
                         component_names.append(component_name)
 
                     # add channel dependency block for composed parent channel
                     sd_nr = len(component_samples)
                     cd_kargs = {"sd_nr": sd_nr}
                     for i, dim in enumerate(shape[::-1]):
-                        cd_kargs[f"dim_{i}"] = dim
+                        cd_kargs[f"dim_{i}"] = dim  # type: ignore[literal-required]
                     parent_dep = ChannelDependency(**cd_kargs)
                     new_gp_dep.append(parent_dep)
 
@@ -1875,10 +1866,7 @@ class MDF3(MDF_Common):
                                 "sender_name": source.path.encode("latin-1"),
                             }
 
-                        source = ChannelExtension(**ce_kargs)
-
-                    else:
-                        source = ce_block
+                        ce_block = ChannelExtension(**ce_kargs)
 
                     s_type, s_size = fmt_to_datatype_v3(samples.dtype, ())
                     # compute additional byte offset for large records size
@@ -1896,7 +1884,6 @@ class MDF3(MDF_Common):
                         "bit_count": s_size,
                         "additional_byte_offset": additional_byte_offset,
                         "block_len": channel_size,
-                        "version": version,
                     }
 
                     s_size = max(s_size, 8)
@@ -1906,7 +1893,7 @@ class MDF3(MDF_Common):
                     channel = Channel(**cn_kargs)
                     channel.name = name
                     channel.comment = signal.comment
-                    channel.source = source
+                    channel.source = ce_block
                     new_gp_channels.append(channel)
 
                     self.channels_db.add(name, (new_dg_cntr, new_ch_cntr))
@@ -1919,8 +1906,8 @@ class MDF3(MDF_Common):
                             parent_dep.referenced_channels.append(dep_pair)
                             description = b"\0"
                         else:
-                            description = f"{signal.name} - axis {name}"
-                            description = description.encode("latin-1")
+                            description_str = f"{signal.name} - axis {name}"
+                            description = description_str.encode("latin-1")
 
                         s_type, s_size = fmt_to_datatype_v3(samples.dtype, ())
                         shape = samples.shape[1:]
@@ -1941,10 +1928,7 @@ class MDF3(MDF_Common):
                                     "sender_name": source.path.encode("latin-1"),
                                 }
 
-                            source = ChannelExtension(**ce_kargs)
-
-                        else:
-                            source = ce_block
+                            ce_block = ChannelExtension(**ce_kargs)
 
                         # compute additional byte offset for large records size
                         if new_offset > v23c.MAX_UINT16:
@@ -1962,7 +1946,6 @@ class MDF3(MDF_Common):
                             "additional_byte_offset": additional_byte_offset,
                             "block_len": channel_size,
                             "description": description,
-                            "version": version,
                         }
 
                         s_size = max(s_size, 8)
@@ -1978,7 +1961,7 @@ class MDF3(MDF_Common):
 
                         channel = Channel(**cn_kargs)
                         channel.name = name
-                        channel.source = source
+                        channel.source = ce_block
                         new_gp_channels.append(channel)
 
                         size = s_size
@@ -2137,7 +2120,7 @@ class MDF3(MDF_Common):
         file = self._tempfile
         tell = file.tell
 
-        ce_kargs = {
+        ce_kargs: ChannelExtensionKwargs = {
             "module_nr": 0,
             "module_address": 0,
             "type": v23c.SOURCE_ECU,
@@ -2147,9 +2130,10 @@ class MDF3(MDF_Common):
 
         dg_cntr = len(self.groups)
 
-        gp = Group(None)
+        gp = Group(DataGroup())
         gp.channels = gp_channels = []
-        gp.channel_dependencies = gp_dep = []
+        gp_dep: list[Optional[ChannelDependency]] = []
+        gp.channel_dependencies = gp_dep
         gp.signal_types = gp_sig_types = []
         gp.string_dtypes = []
         gp.record = record = []
@@ -2165,11 +2149,11 @@ class MDF3(MDF_Common):
 
         if df.shape[0]:
             # conversion for time channel
-            cc_kargs = {
+            cc_kargs: ChannelConversionKwargs = {
                 "conversion_type": v23c.CONVERSION_TYPE_NONE,
                 "unit": b"s",
-                "min_phy_value": timestamps[0] if cycles_nr else 0,
-                "max_phy_value": timestamps[-1] if cycles_nr else 0,
+                "min_phy_value": typing.cast(float, timestamps[0]) if cycles_nr else 0,
+                "max_phy_value": typing.cast(float, timestamps[-1]) if cycles_nr else 0,
             }
             conversion = ChannelConversion(**cc_kargs)
             conversion.unit = "s"
@@ -2177,16 +2161,15 @@ class MDF3(MDF_Common):
 
             # time channel
             t_type, t_size = fmt_to_datatype_v3(timestamps.dtype, timestamps.shape)
-            cn_kargs = {
+            cn_kargs: ChannelKwargs = {
                 "short_name": time_name.encode("latin-1"),
                 "channel_type": v23c.CHANNEL_TYPE_MASTER,
                 "data_type": t_type,
                 "start_offset": 0,
-                "min_raw_value": timestamps[0] if cycles_nr else 0,
-                "max_raw_value": timestamps[-1] if cycles_nr else 0,
+                "min_raw_value": typing.cast(float, timestamps[0]) if cycles_nr else 0,
+                "max_raw_value": typing.cast(float, timestamps[-1]) if cycles_nr else 0,
                 "bit_count": t_size,
                 "block_len": channel_size,
-                "version": version,
             }
             channel = Channel(**cn_kargs)
             channel.name = name = time_name
@@ -3228,6 +3211,8 @@ class MDF3(MDF_Common):
 
         time_ch_nr = self.masters_db.get(index, None)
         cycles_nr = group.channel_group.cycles_nr
+
+        metadata: tuple[str, Literal[1]]
 
         if time_ch_nr is None:
             if fragment:
