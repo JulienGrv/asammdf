@@ -883,7 +883,7 @@ class _ChannelConversionBase:
 
 class ChannelConversionKwargs(BlockKwargs, total=False):
     raw_bytes: bytes
-    unit: Union[bytes, str]
+    unit: bytes
     conversion_type: int
     range_flag: int
     min_phy_value: float
@@ -991,7 +991,7 @@ class ChannelConversion(_ChannelConversionBase):
         self.is_user_defined = False
 
         self.unit = self.formula = ""
-        self.unit_field: Union[bytes, str]
+        self.unit_field: bytes
 
         self.referenced_blocks: dict[str, bytes] = {}
 

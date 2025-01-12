@@ -95,7 +95,7 @@ __all__ = [
 ]
 
 
-class _AttachmentBlockKwargs(BlockKwargs, total=False):
+class AttachmentBlockKwargs(BlockKwargs, total=False):
     data: bytes
     comment: str
     mime: str
@@ -172,7 +172,7 @@ class AttachmentBlock:
         "reserved1",
     )
 
-    def __init__(self, **kwargs: Unpack[_AttachmentBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[AttachmentBlockKwargs]) -> None:
         self.file_name = self.mime = self.comment = ""
 
         try:
@@ -373,7 +373,7 @@ class AttachmentBlock:
         return f"ATBLOCK(address={self.address:x}, file_name={self.file_name}, comment={self.comment})"
 
 
-class _ChannelKwargs(BlockKwargs, total=False):
+class ChannelKwargs(BlockKwargs, total=False):
     at_map: dict[int, int]
     tx_map: dict[int, Union[bytes, str]]
     parsed_strings: Optional[tuple[str, dict[str, str], str]]
@@ -535,7 +535,7 @@ class Channel:
         "upper_limit",
     )
 
-    def __init__(self, **kwargs: Unpack[_ChannelKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[ChannelKwargs]) -> None:
         if "stream" in kwargs:
             self.address = address = kwargs["address"]
             self.dtype_fmt = self.attachment = None
@@ -2305,7 +2305,7 @@ class _ChannelConversionBase:
     )
 
 
-class _ChannelConversionKwargs(BlockKwargs, total=False):
+class ChannelConversionKwargs(BlockKwargs, total=False):
     raw_bytes: bytes
     name: str
     unit: str
@@ -2430,7 +2430,7 @@ class ChannelConversion(_ChannelConversionBase):
 
     """
 
-    def __init__(self, **kwargs: Unpack[_ChannelConversionKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[ChannelConversionKwargs]) -> None:
         self._cache = None
         self.is_user_defined = False
 
@@ -2737,7 +2737,7 @@ class ChannelConversion(_ChannelConversionBase):
                 for i, val in enumerate(values):
                     self[f"mask_{i}"] = val
 
-            self.referenced_blocks: Optional[dict[str, Union[bytes, ChannelConversion]]] = None
+            self.referenced_blocks: dict[str, Union[bytes, ChannelConversion]] = {}
 
             tx_map = kwargs["tx_map"]
 
@@ -4461,7 +4461,7 @@ formula: {self.formula}
         return f"<ChannelConversion (name: {self.name}, unit: {self.unit}, comment: {self.comment}, formula: {self.formula}, referenced blocks: {self.referenced_blocks}, address: {self.address}, fields: {block_fields(self)})>"
 
 
-class _DataBlockKwargs(BlockKwargs, total=False):
+class DataBlockKwargs(BlockKwargs, total=False):
     data: bytes
 
 
@@ -4497,7 +4497,7 @@ class DataBlock:
 
     __slots__ = ("address", "block_len", "data", "id", "links_nr", "reserved0")
 
-    def __init__(self, **kwargs: Unpack[_DataBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[DataBlockKwargs]) -> None:
         try:
             self.address = address = kwargs["address"]
             stream = kwargs["stream"]
@@ -4546,7 +4546,7 @@ class DataBlock:
         return v4c.COMMON_p(self.id, self.reserved0, self.block_len, self.links_nr) + self.data
 
 
-class _DataZippedBlockKwargs(BlockKwargs, total=False):
+class DataZippedBlockKwargs(BlockKwargs, total=False):
     data: bytes
     original_type: bytes
     zip_type: int
@@ -4606,7 +4606,7 @@ class DataZippedBlock:
         "zip_type",
     )
 
-    def __init__(self, **kwargs: Unpack[_DataZippedBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[DataZippedBlockKwargs]) -> None:
         self._prevent_data_setitem = True
         self._transposed = False
         try:
@@ -4749,7 +4749,7 @@ class DataZippedBlock:
         return data
 
 
-class _DataGroupKwargs(BlockKwargs, total=False):
+class DataGroupKwargs(BlockKwargs, total=False):
     reserved0: int
     block_len: int
     links_nr: int
@@ -4805,7 +4805,7 @@ class DataGroup:
         "reserved1",
     )
 
-    def __init__(self, **kwargs: Unpack[_DataGroupKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[DataGroupKwargs]) -> None:
         self.comment = ""
 
         try:
@@ -4940,7 +4940,7 @@ class _DataListBase:
     )
 
 
-class _DataListKwargs(BlockKwargs, total=False):
+class DataListKwargs(BlockKwargs, total=False):
     links_nr: int
     flags: int
     reserved1: bytes
@@ -4982,7 +4982,7 @@ class DataList(_DataListBase):
 
     """
 
-    def __init__(self, **kwargs: Unpack[_DataListKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[DataListKwargs]) -> None:
         try:
             self.address = address = kwargs["address"]
             stream = kwargs["stream"]
@@ -5134,7 +5134,7 @@ class _EventBlockBase:
     )
 
 
-class _EventBlockKwargs(BlockKwargs, total=False):
+class EventBlockKwargs(BlockKwargs, total=False):
     next_ev_addr: int
     parent_ev_addr: int
     range_start_ev_addr: int
@@ -5198,7 +5198,7 @@ class EventBlock(_EventBlockBase):
 
     """
 
-    def __init__(self, **kwargs: Unpack[_EventBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[EventBlockKwargs]) -> None:
         self.name = self.comment = self.group_name = ""
         self.scopes = []
         self.parent = None
@@ -5406,7 +5406,7 @@ class EventBlock(_EventBlockBase):
         return address
 
 
-class _FileIdentificationBlockKwargs(TypedDict, total=False):
+class FileIdentificationBlockKwargs(TypedDict, total=False):
     stream: FileLike
     version: str
 
@@ -5445,7 +5445,7 @@ class FileIdentificationBlock:
         "version_str",
     )
 
-    def __init__(self, **kwargs: Unpack[_FileIdentificationBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[FileIdentificationBlockKwargs]) -> None:
         super().__init__()
 
         self.address = 0
@@ -5493,7 +5493,7 @@ class FileIdentificationBlock:
         return result
 
 
-class _FileHistoryKwargs(BlockKwargs, total=False):
+class FileHistoryKwargs(BlockKwargs, total=False):
     reserved0: int
     block_len: int
     links_nr: int
@@ -5549,7 +5549,7 @@ class FileHistory:
         "tz_offset",
     )
 
-    def __init__(self, **kwargs: Unpack[_FileHistoryKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[FileHistoryKwargs]) -> None:
         super().__init__()
 
         self.comment = ""
@@ -5686,7 +5686,7 @@ class FileHistory:
         return f"FHBLOCK(time={self.time_stamp}, comment={self.comment})"
 
 
-class _HeaderBlockKwargs(TypedDict, total=False):
+class HeaderBlockKwargs(TypedDict, total=False):
     address: int
     stream: FileLike
     reserved3: int
@@ -5749,7 +5749,7 @@ class HeaderBlock:
 
     """
 
-    def __init__(self, **kwargs: Unpack[_HeaderBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[HeaderBlockKwargs]) -> None:
         super().__init__()
 
         self._common_properties: dict[Optional[str], Union[dict[Optional[str], str], str]] = {}
@@ -6059,7 +6059,7 @@ class HeaderBlock:
         return result
 
 
-class _HeaderListKwargs(BlockKwargs, total=False):
+class HeaderListKwargs(BlockKwargs, total=False):
     first_dl_addr: int
     flags: int
     zip_type: int
@@ -6100,7 +6100,7 @@ class HeaderList:
         "zip_type",
     )
 
-    def __init__(self, **kwargs: Unpack[_HeaderListKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[HeaderListKwargs]) -> None:
         super().__init__()
 
         try:
@@ -6406,7 +6406,7 @@ class ListData(_ListDataBase):
         return result
 
 
-class _SourceInformationKwargs(BlockKwargs, total=False):
+class SourceInformationKwargs(BlockKwargs, total=False):
     raw_bytes: bytes
     tx_map: dict[int, str]
     source_type: int
@@ -6460,7 +6460,7 @@ class SourceInformation:
         "source_type",
     )
 
-    def __init__(self, **kwargs: Unpack[_SourceInformationKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[SourceInformationKwargs]) -> None:
         self.name = self.path = self.comment = ""
 
         if "stream" in kwargs:
@@ -6698,7 +6698,7 @@ comment: {self.comment}
         return f"<SourceInformation (name: {self.name}, path: {self.path}, comment: {self.comment}, address: {hex(self.address)}, fields: {block_fields(self)})>"
 
 
-class _TextBlockKwargs(BlockKwargs, total=False):
+class TextBlockKwargs(BlockKwargs, total=False):
     safe: bool
     text: Union[bytes, str]
     meta: bool
@@ -6738,7 +6738,7 @@ class TextBlock:
 
     __slots__ = ("address", "block_len", "id", "links_nr", "reserved0", "text")
 
-    def __init__(self, **kwargs: Unpack[_TextBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[TextBlockKwargs]) -> None:
         if "safe" in kwargs:
             self.address = 0
             text = kwargs["text"]
