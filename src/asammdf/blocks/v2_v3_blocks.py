@@ -2341,7 +2341,7 @@ class ChannelGroup:
         self,
         address: int,
         blocks: list[Union[bytes, SupportsBytes]],
-        defined_texts: dict[str, int],
+        defined_texts: dict[Union[bytes, str], int],
         si_map: dict[bytes, int],
     ) -> int:
         key = "comment_addr"

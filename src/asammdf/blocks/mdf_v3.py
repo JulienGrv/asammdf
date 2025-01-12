@@ -3241,11 +3241,16 @@ class MDF3(MDF_Common):
                 else:
                     data_ = (data,)
 
+                record = group.record[time_ch_nr]
+
+                if record is None:
+                    raise ValueError("record is None")
+
                 time_values = []
                 count = 0
                 for fragment in data_:
                     data_bytes, offset, _count = fragment
-                    dtype_, byte_size, byte_offset, bit_offset = group.record[time_ch_nr]
+                    dtype_, byte_size, byte_offset, bit_offset = record
 
                     buffer = get_channel_raw_bytes(
                         data_bytes,
@@ -3468,7 +3473,7 @@ class MDF3(MDF_Common):
             text = f"{old_history}\n{timestamp}: updated by {tool.__tool__} {tool.__version__}"
             self.header.comment = text
 
-        defined_texts: dict[str, int] = {}
+        defined_texts: dict[Union[bytes, str], int] = {}
         cc_map: dict[bytes, int] = {}
         si_map: dict[bytes, int] = {}
 
