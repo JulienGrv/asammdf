@@ -163,7 +163,7 @@ class Signal:
             if source:
                 if not isinstance(source, Source):
                     source = Source.from_source(source)
-            self.source = source
+            self.source: Optional[Source] = source
 
             if bit_count is None:
                 self.bit_count = self.samples.dtype.itemsize * 8

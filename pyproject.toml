@@ -93,18 +93,7 @@ skip = ["pp*", "*_ppc64le", "*-musllinux*", "*_s390x"]
 
 [tool.mypy]
 files = "."
-exclude = [
-    "build/",
-    "dist/",
-    "doc/_build/",
-    "src/asammdf/blocks/bus_logging_utils.py",
-    "src/asammdf/blocks/conversion_utils.py",
-    "src/asammdf/blocks/mdf_v4.py",
-    "src/asammdf/blocks/v4_blocks.py",
-    "src/asammdf/gui/",
-    "src/asammdf/mdf.py",
-    "src/asammdf/signal.py",
-]
+exclude = ["build/", "dist/", "doc/_build/"]
 python_version = "3.9"
 plugins = ["numpy.typing.mypy_plugin"]
 
@@ -128,7 +117,15 @@ module = [
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "asammdf.gui.*"
+module = [
+    "asammdf.blocks.bus_logging_utils",
+    "asammdf.blocks.conversion_utils",
+    "asammdf.blocks.mdf_v4",
+    "asammdf.blocks.v4_blocks",
+    "asammdf.gui.*",
+    "asammdf.mdf",
+    "asammdf.signal",
+]
 ignore_errors = true
 
 [tool.ruff]

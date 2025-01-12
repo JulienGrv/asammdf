@@ -991,7 +991,6 @@ class ChannelConversion(_ChannelConversionBase):
         self.is_user_defined = False
 
         self.unit = self.formula = ""
-        self.unit_field: bytes
 
         self.referenced_blocks: dict[str, bytes] = {}
 
@@ -2341,7 +2340,7 @@ class ChannelGroup:
     def to_blocks(
         self,
         address: int,
-        blocks: list[SupportsBytes],
+        blocks: list[Union[bytes, SupportsBytes]],
         defined_texts: dict[str, int],
         si_map: dict[bytes, int],
     ) -> int:
@@ -3350,7 +3349,7 @@ class TriggerBlock:
                 key = f"trigger_{i}_posttime"
                 self[key] = kwargs[key]  # type: ignore[literal-required]
 
-    def to_blocks(self, address: int, blocks: list[SupportsBytes]) -> int:
+    def to_blocks(self, address: int, blocks: list[Union[bytes, SupportsBytes]]) -> int:
         key = "text_addr"
         text = self.comment
         if text:

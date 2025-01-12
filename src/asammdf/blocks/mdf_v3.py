@@ -16,7 +16,7 @@ from tempfile import NamedTemporaryFile
 import time
 from traceback import format_exc
 import typing
-from typing import Any, BinaryIO, Optional, overload, Union
+from typing import Any, BinaryIO, Optional, overload, SupportsBytes, Union
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -2184,7 +2184,7 @@ class MDF3(MDF_Common):
             record.append(
                 (
                     timestamps.dtype,
-                    timestamps.dtype.itemsize,
+                    timestamps.size,
                     0,
                     0,
                 )
@@ -2253,7 +2253,7 @@ class MDF3(MDF_Common):
                 # conversion for time channel
                 cc_kwargs: ChannelConversionKwargs = {
                     "conversion_type": v23c.CONVERSION_TYPE_NONE,
-                    "unit": unit,
+                    "unit": unit.encode(encoding="latin-1"),
                     "min_phy_value": 0,
                     "max_phy_value": 0,
                 }
@@ -3301,12 +3301,12 @@ class MDF3(MDF_Common):
                     time_conv_type = v23c.CONVERSION_TYPE_NONE
                 else:
                     time_conv_type = conversion.conversion_type
-                if time_conv_type == v23c.CONVERSION_TYPE_LINEAR:
-                    time_a = conversion.a
-                    time_b = conversion.b
-                    t = t * time_a
-                    if time_b:
-                        t += time_b
+                    if time_conv_type == v23c.CONVERSION_TYPE_LINEAR:
+                        time_a = conversion.a
+                        time_b = conversion.b
+                        t = t * time_a
+                        if time_b:
+                            t += time_b
 
         if t.dtype != float64:
             t = t.astype(float64)
@@ -3344,14 +3344,14 @@ class MDF3(MDF_Common):
         for i, gp in enumerate(self.groups):
             trigger = gp.trigger
             if trigger:
-                for j in range(trigger["trigger_events_nr"]):
+                for j in range(trigger.trigger_events_nr):
                     trigger_info: TriggerInfoDict = {
                         "comment": trigger.comment,
                         "index": j,
                         "group": i,
-                        "time": trigger[f"trigger_{j}_time"],
-                        "pre_time": trigger[f"trigger_{j}_pretime"],
-                        "post_time": trigger[f"trigger_{j}_posttime"],
+                        "time": typing.cast(float, trigger[f"trigger_{j}_time"]),
+                        "pre_time": typing.cast(float, trigger[f"trigger_{j}_pretime"]),
+                        "post_time": typing.cast(float, trigger[f"trigger_{j}_posttime"]),
                     }
                     yield trigger_info
 
@@ -3483,8 +3483,7 @@ class MDF3(MDF_Common):
             write = dst_.write
             seek = dst_.seek
             # list of all blocks
-            blocks = []
-
+            blocks: list[Union[bytes, SupportsBytes]] = []
             address = 0
 
             write(bytes(self.identification))
@@ -3541,9 +3540,9 @@ class MDF3(MDF_Common):
                 address += dg.block_len
 
             if self.groups:
-                for i, dg in enumerate(self.groups[:-1]):
+                for i, gp in enumerate(self.groups[:-1]):
                     addr = self.groups[i + 1].data_group.address
-                    dg.data_group.next_dg_addr = addr
+                    gp.data_group.next_dg_addr = addr
                 self.groups[-1].data_group.next_dg_addr = 0
 
             for idx, gp in enumerate(self.groups):
