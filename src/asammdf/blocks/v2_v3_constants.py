@@ -230,10 +230,10 @@ HEADER_COMMON_KEYS = (
 )
 
 FMT_COMMON = "<2sH"
-_Common = tuple[bytes, int]
+Common = tuple[bytes, int]
 COMMON_SIZE = 4
-COMMON_u: Callable[[Buffer], _Common] = struct.Struct(FMT_COMMON).unpack
-COMMON_uf: Callable[[Buffer, int], _Common] = struct.Struct(FMT_COMMON).unpack_from
+COMMON_u: Callable[[Buffer], Common] = struct.Struct(FMT_COMMON).unpack
+COMMON_uf: Callable[[Buffer, int], Common] = struct.Struct(FMT_COMMON).unpack_from
 COMMON_p = struct.Struct(FMT_COMMON).pack
 
 HEADER_POST_320_EXTRA_FMT = "QhH32s"
@@ -246,19 +246,17 @@ HEADER_POST_320_EXTRA_KEYS = (
 )
 
 FMT_CHANNEL_FILTER = "<2sHI16xH32s"
-_ChannelFilter = tuple[bytes, int, int, int, bytes]
-CHANNEL_FILTER_u: Callable[[Buffer], _ChannelFilter] = struct.Struct(FMT_CHANNEL_FILTER).unpack
-CHANNEL_FILTER_uf: Callable[[Buffer, int], _ChannelFilter] = struct.Struct(FMT_CHANNEL_FILTER).unpack_from
+ChannelFilter = tuple[bytes, int, int, int, bytes]
+CHANNEL_FILTER_u: Callable[[Buffer], ChannelFilter] = struct.Struct(FMT_CHANNEL_FILTER).unpack
+CHANNEL_FILTER_uf: Callable[[Buffer, int], ChannelFilter] = struct.Struct(FMT_CHANNEL_FILTER).unpack_from
 CHANNEL_FILTER_SIZE = 58
 
 FMT_CHANNEL_DISPLAYNAME = "<2sH5IH32s128s4H3d2IH"
-_ChannelDisplayname = tuple[
+ChannelDisplayname = tuple[
     bytes, int, int, int, int, int, int, int, bytes, bytes, int, int, int, int, float, float, float, int, int, int
 ]
-CHANNEL_DISPLAYNAME_u: Callable[[Buffer], _ChannelDisplayname] = struct.Struct(FMT_CHANNEL_DISPLAYNAME).unpack
-CHANNEL_DISPLAYNAME_uf: Callable[[Buffer, int], _ChannelDisplayname] = struct.Struct(
-    FMT_CHANNEL_DISPLAYNAME
-).unpack_from
+CHANNEL_DISPLAYNAME_u: Callable[[Buffer], ChannelDisplayname] = struct.Struct(FMT_CHANNEL_DISPLAYNAME).unpack
+CHANNEL_DISPLAYNAME_uf: Callable[[Buffer, int], ChannelDisplayname] = struct.Struct(FMT_CHANNEL_DISPLAYNAME).unpack_from
 CHANNEL_DISPLAYNAME_p = struct.Struct(FMT_CHANNEL_DISPLAYNAME).pack
 KEYS_CHANNEL_DISPLAYNAME = (
     "id",
@@ -284,14 +282,16 @@ KEYS_CHANNEL_DISPLAYNAME = (
 )
 
 FMT_CHANNEL_SHORT = "<2sH5IH32s128s4H3d"
-_ChannelShort = tuple[bytes, int, int, int, int, int, int, int, bytes, bytes, int, int, int, int, float, float, float]
-CHANNEL_SHORT_u: Callable[[Buffer], _ChannelShort] = struct.Struct(FMT_CHANNEL_SHORT).unpack
-CHANNEL_SHORT_uf: Callable[[Buffer, int], _ChannelShort] = struct.Struct(FMT_CHANNEL_SHORT).unpack_from
+ChannelShort = tuple[bytes, int, int, int, int, int, int, int, bytes, bytes, int, int, int, int, float, float, float]
+CHANNEL_SHORT_u: Callable[[Buffer], ChannelShort] = struct.Struct(FMT_CHANNEL_SHORT).unpack
+CHANNEL_SHORT_uf: Callable[[Buffer, int], ChannelShort] = struct.Struct(FMT_CHANNEL_SHORT).unpack_from
 CHANNEL_SHORT_p = struct.Struct(FMT_CHANNEL_SHORT).pack
 FMT_CHANNEL_LONGNAME = FMT_CHANNEL_SHORT + "I"
-_ChannelLongname = tuple[*_ChannelShort, int]
-CHANNEL_LONGNAME_u: Callable[[Buffer], _ChannelLongname] = struct.Struct(FMT_CHANNEL_LONGNAME).unpack
-CHANNEL_LONGNAME_uf: Callable[[Buffer, int], _ChannelLongname] = struct.Struct(FMT_CHANNEL_LONGNAME).unpack_from
+ChannelLongname = tuple[
+    bytes, int, int, int, int, int, int, int, bytes, bytes, int, int, int, int, float, float, float, int
+]
+CHANNEL_LONGNAME_u: Callable[[Buffer], ChannelLongname] = struct.Struct(FMT_CHANNEL_LONGNAME).unpack
+CHANNEL_LONGNAME_uf: Callable[[Buffer, int], ChannelLongname] = struct.Struct(FMT_CHANNEL_LONGNAME).unpack_from
 CHANNEL_LONGNAME_p = struct.Struct(FMT_CHANNEL_LONGNAME).pack
 KEYS_CHANNEL_SHORT = (
     "id",
@@ -315,7 +315,7 @@ KEYS_CHANNEL_SHORT = (
 KEYS_CHANNEL_LONGNAME = (*KEYS_CHANNEL_SHORT, "long_name_addr")
 
 FMT_CHANNEL_GROUP = "<2sH3I3HI"
-_ChannelGroup = tuple[bytes, int, int, int, int, int, int, int, int]
+ChannelGroup = tuple[bytes, int, int, int, int, int, int, int, int]
 KEYS_CHANNEL_GROUP = (
     "id",
     "block_len",
@@ -328,8 +328,8 @@ KEYS_CHANNEL_GROUP = (
     "cycles_nr",
 )
 
-CHANNEL_GROUP_u: Callable[[Buffer], _ChannelGroup] = struct.Struct(FMT_CHANNEL_GROUP).unpack
-CHANNEL_GROUP_uf: Callable[[Buffer, int], _ChannelGroup] = struct.Struct(FMT_CHANNEL_GROUP).unpack_from
+CHANNEL_GROUP_u: Callable[[Buffer], ChannelGroup] = struct.Struct(FMT_CHANNEL_GROUP).unpack
+CHANNEL_GROUP_uf: Callable[[Buffer, int], ChannelGroup] = struct.Struct(FMT_CHANNEL_GROUP).unpack_from
 CHANNEL_GROUP_p = struct.Struct(FMT_CHANNEL_GROUP).pack
 
 FMT_DATA_GROUP_POST_320 = "<2sH4I2H4s"
@@ -346,7 +346,7 @@ KEYS_DATA_GROUP_POST_320 = (
 )
 
 FMT_DATA_GROUP_PRE_320 = "<2sH4I2H"
-_DataGroupPre320 = tuple[bytes, int, int, int, int, int, int, int]
+DataGroupPre320 = tuple[bytes, int, int, int, int, int, int, int]
 KEYS_DATA_GROUP_PRE_320 = (
     "id",
     "block_len",
@@ -357,23 +357,23 @@ KEYS_DATA_GROUP_PRE_320 = (
     "cg_nr",
     "record_id_len",
 )
-DATA_GROUP_PRE_320_u: Callable[[Buffer], _DataGroupPre320] = struct.Struct(FMT_DATA_GROUP_PRE_320).unpack
-DATA_GROUP_PRE_320_uf: Callable[[Buffer, int], _DataGroupPre320] = struct.Struct(FMT_DATA_GROUP_PRE_320).unpack_from
+DATA_GROUP_PRE_320_u: Callable[[Buffer], DataGroupPre320] = struct.Struct(FMT_DATA_GROUP_PRE_320).unpack
+DATA_GROUP_PRE_320_uf: Callable[[Buffer, int], DataGroupPre320] = struct.Struct(FMT_DATA_GROUP_PRE_320).unpack_from
 DATA_GROUP_PRE_320_p = struct.Struct(FMT_DATA_GROUP_PRE_320).pack
 
 FMT_SOURCE_COMMON = "<2s2H"
-_SourceCommon = tuple[bytes, int, int]
-SOURCE_COMMON_u: Callable[[Buffer], _SourceCommon] = struct.Struct(FMT_SOURCE_COMMON).unpack
-SOURCE_COMMON_uf: Callable[[Buffer, int], _SourceCommon] = struct.Struct(FMT_SOURCE_COMMON).unpack_from
+SourceCommon = tuple[bytes, int, int]
+SOURCE_COMMON_u: Callable[[Buffer], SourceCommon] = struct.Struct(FMT_SOURCE_COMMON).unpack
+SOURCE_COMMON_uf: Callable[[Buffer, int], SourceCommon] = struct.Struct(FMT_SOURCE_COMMON).unpack_from
 FMT_SOURCE_ECU = "<2s3HI80s32s4s"
-_SourceEcu = tuple[bytes, int, int, int, int, bytes, bytes, bytes]
-SOURCE_ECU_u: Callable[[Buffer], _SourceEcu] = struct.Struct(FMT_SOURCE_ECU).unpack
-SOURCE_ECU_uf: Callable[[Buffer, int], _SourceEcu] = struct.Struct(FMT_SOURCE_ECU).unpack_from
+SourceEcu = tuple[bytes, int, int, int, int, bytes, bytes, bytes]
+SOURCE_ECU_u: Callable[[Buffer], SourceEcu] = struct.Struct(FMT_SOURCE_ECU).unpack
+SOURCE_ECU_uf: Callable[[Buffer, int], SourceEcu] = struct.Struct(FMT_SOURCE_ECU).unpack_from
 SOURCE_ECU_p = struct.Struct(FMT_SOURCE_ECU).pack
 FMT_SOURCE_EXTRA_ECU = "<HI80s32s4s"
-_SourceExtraEcu = tuple[int, int, bytes, bytes, bytes]
-SOURCE_EXTRA_ECU_u: Callable[[Buffer], _SourceExtraEcu] = struct.Struct(FMT_SOURCE_EXTRA_ECU).unpack
-SOURCE_EXTRA_ECU_uf: Callable[[Buffer, int], _SourceExtraEcu] = struct.Struct(FMT_SOURCE_EXTRA_ECU).unpack_from
+SourceExtraEcu = tuple[int, int, bytes, bytes, bytes]
+SOURCE_EXTRA_ECU_u: Callable[[Buffer], SourceExtraEcu] = struct.Struct(FMT_SOURCE_EXTRA_ECU).unpack
+SOURCE_EXTRA_ECU_uf: Callable[[Buffer, int], SourceExtraEcu] = struct.Struct(FMT_SOURCE_EXTRA_ECU).unpack_from
 KEYS_SOURCE_ECU = (
     "id",
     "block_len",
@@ -386,14 +386,14 @@ KEYS_SOURCE_ECU = (
 )
 
 FMT_SOURCE_VECTOR = "<2s2H2I36s36s42s"
-_SourceVector = tuple[bytes, int, int, int, int, bytes, bytes, bytes]
-SOURCE_VECTOR_u: Callable[[Buffer], _SourceVector] = struct.Struct(FMT_SOURCE_VECTOR).unpack
-SOURCE_VECTOR_uf: Callable[[Buffer, int], _SourceVector] = struct.Struct(FMT_SOURCE_VECTOR).unpack_from
+SourceVector = tuple[bytes, int, int, int, int, bytes, bytes, bytes]
+SOURCE_VECTOR_u: Callable[[Buffer], SourceVector] = struct.Struct(FMT_SOURCE_VECTOR).unpack
+SOURCE_VECTOR_uf: Callable[[Buffer, int], SourceVector] = struct.Struct(FMT_SOURCE_VECTOR).unpack_from
 SOURCE_VECTOR_p = struct.Struct(FMT_SOURCE_VECTOR).pack
 FMT_SOURCE_EXTRA_VECTOR = "<2I36s36s42s"
-_SourceExtraVector = tuple[int, int, bytes, bytes, bytes]
-SOURCE_EXTRA_VECTOR_u: Callable[[Buffer], _SourceExtraVector] = struct.Struct(FMT_SOURCE_EXTRA_VECTOR).unpack
-SOURCE_EXTRA_VECTOR_uf: Callable[[Buffer, int], _SourceExtraVector] = struct.Struct(FMT_SOURCE_EXTRA_VECTOR).unpack_from
+SourceExtraVector = tuple[int, int, bytes, bytes, bytes]
+SOURCE_EXTRA_VECTOR_u: Callable[[Buffer], SourceExtraVector] = struct.Struct(FMT_SOURCE_EXTRA_VECTOR).unpack
+SOURCE_EXTRA_VECTOR_uf: Callable[[Buffer, int], SourceExtraVector] = struct.Struct(FMT_SOURCE_EXTRA_VECTOR).unpack_from
 KEYS_SOURCE_VECTOR = (
     "id",
     "block_len",
@@ -409,8 +409,8 @@ KEYS_TEXT_BLOCK = ("id", "block_len", "text")
 
 FMT_CONVERSION_COMMON = FMT_CONVERSION_NONE = "<2s2H2d20s2H"
 FMT_CONVERSION_COMMON_SHORT = "<H2d20s2H"
-_ConversionCommonShort = tuple[int, float, float, bytes, int, int]
-CONVERSION_COMMON_SHORT_uf: Callable[[Buffer, int], _ConversionCommonShort] = struct.Struct(
+ConversionCommonShort = tuple[int, float, float, bytes, int, int]
+CONVERSION_COMMON_SHORT_uf: Callable[[Buffer, int], ConversionCommonShort] = struct.Struct(
     FMT_CONVERSION_COMMON_SHORT
 ).unpack_from
 

@@ -75,10 +75,12 @@ from .v2_v3_blocks import (
     ChannelConversionKwargs,
     ChannelDependency,
     ChannelExtension,
+    ChannelExtensionKwargs,
     ChannelGroup,
     ChannelGroupKwargs,
     ChannelKwargs,
     DataGroup,
+    DataGroupKwargs,
     FileIdentificationBlock,
     HeaderBlock,
     TextBlock,
@@ -313,6 +315,9 @@ class MDF3(MDF_Common):
         record_count: Optional[int] = None,
     ) -> Iterator[tuple[bytes, int, Optional[int]]]:
         """get group's data block bytes"""
+        if self._file is None:
+            raise RuntimeError(f"file was not opened '{self.name}'")
+
         has_yielded = False
         offset = 0
         _count = record_count
@@ -347,7 +352,7 @@ class MDF3(MDF_Common):
                     y_axis = CONVERT
 
                     idx = searchsorted(CHANNEL_COUNT, channels_nr, side="right") - 1
-                    idx = max(idx, 0)
+                    idx = max(idx, 0)  # type: ignore[arg-type]
                     split_size = y_axis[idx]
 
                     split_size = split_size // samples_size
@@ -477,7 +482,7 @@ class MDF3(MDF_Common):
                 record_id_nr = 0
             data_list = []
 
-            blocks = group.data_blocks
+            blocks = iter(group.data_blocks)
 
             for info in blocks:
                 address, size = info.address, info.original_size
@@ -738,7 +743,7 @@ class MDF3(MDF_Common):
 
             new_groups: list[Group] = []
             for i in range(cg_nr):
-                kargs = {"first_cg_addr": cg_addr, "data_block_addr": data_addr}
+                kargs: DataGroupKwargs = {"first_cg_addr": cg_addr, "data_block_addr": data_addr}
                 if self.version >= "3.20":
                     kargs["block_len"] = v23c.DG_POST_320_BLOCK_SIZE
                 else:
@@ -867,9 +872,9 @@ class MDF3(MDF_Common):
                     # check if it has channel dependencies
                     if new_ch.component_addr:
                         dep = ChannelDependency(address=new_ch.component_addr, stream=stream)
-                        grp.channel_dependencies.append(dep)
                     else:
-                        grp.channel_dependencies.append(None)
+                        dep = None
+                    grp.channel_dependencies.append(dep)
 
                     # update channel map
                     entry = dg_cntr, ch_cntr
@@ -943,7 +948,7 @@ class MDF3(MDF_Common):
             for dep in grp.channel_dependencies:
                 if dep:
                     for i in range(dep.sd_nr):
-                        ref_channel_addr = dep[f"ch_{i}"]
+                        ref_channel_addr = typing.cast(int, dep[f"ch_{i}"])
                         channel = ch_map[ref_channel_addr]
                         dep.referenced_channels.append(channel)
 
@@ -956,27 +961,23 @@ class MDF3(MDF_Common):
         source_path: Optional[str] = None,
         acq_name: Optional[str] = None,
     ) -> Iterator[tuple[int, int]]:
+        occurrences_iter = iter(occurrences)
+
         if source_name is not None:
-            occurrences = (
+            occurrences_iter = (
                 (gp_idx, cn_idx)
-                for gp_idx, cn_idx in occurrences
-                if (
-                    self.groups[gp_idx].channels[cn_idx].source is not None
-                    and self.groups[gp_idx].channels[cn_idx].source.name == source_name
-                )
+                for gp_idx, cn_idx in occurrences_iter
+                if (source := self.groups[gp_idx].channels[cn_idx].source) is not None and source.name == source_name
             )
 
         if source_path is not None:
-            occurrences = (
+            occurrences_iter = (
                 (gp_idx, cn_idx)
-                for gp_idx, cn_idx in occurrences
-                if (
-                    self.groups[gp_idx].channels[cn_idx].source is not None
-                    and self.groups[gp_idx].channels[cn_idx].source.path == source_path
-                )
+                for gp_idx, cn_idx in occurrences_iter
+                if (source := self.groups[gp_idx].channels[cn_idx].source) is not None and source.path == source_path
             )
 
-        return occurrences
+        return occurrences_iter
 
     def add_trigger(
         self,
@@ -998,7 +999,7 @@ class MDF3(MDF_Common):
             trigger pre time; default 0
         post_time : float
             trigger post time; default 0
-        comment : str
+        comment : str | None
             trigger comment
 
         """
@@ -1006,25 +1007,26 @@ class MDF3(MDF_Common):
     <TX>{}</TX>
 </EVcomment>"""
         try:
-            group = self.groups[group]
+            gp = self.groups[group]
         except IndexError:
             return
 
-        trigger = group.trigger
+        trigger = gp.trigger
 
         if comment:
             try:
                 comment_elem = ET.fromstring(comment)
-                if comment_elem.find(".//TX") is not None:
-                    comment = comment_elem.find(".//TX").text
+                tx_elem = comment_elem.find(".//TX")
+                if tx_elem is not None:
+                    comment = tx_elem.text or ""
                 else:
                     comment = ""
             except ET.ParseError:
                 pass
 
         if trigger:
-            count = trigger["trigger_events_nr"]
-            trigger["trigger_events_nr"] += 1
+            count = trigger.trigger_events_nr
+            trigger.trigger_events_nr += 1
             trigger.block_len += 24
             trigger[f"trigger_{count}_time"] = timestamp
             trigger[f"trigger_{count}_pretime"] = pre_time
@@ -1038,8 +1040,9 @@ class MDF3(MDF_Common):
                     current_comment = trigger.comment
                     try:
                         comment_elem = ET.fromstring(current_comment)
-                        if comment_elem.find(".//TX") is not None:
-                            current_comment = comment_elem.find(".//TX").text
+                        tx_elem = comment_elem.find(".//TX")
+                        if tx_elem is not None:
+                            current_comment = tx_elem.text or ""
                         else:
                             current_comment = ""
                     except ET.ParseError:
@@ -1050,17 +1053,16 @@ class MDF3(MDF_Common):
                     trigger.comment = comment
         else:
             trigger = TriggerBlock(
-                trigger_event_nr=1,
-                trigger_0_time=timestamp,
-                trigger_0_pretime=pre_time,
-                trigger_0_posttime=post_time,
+                trigger_0_time=timestamp,  # type: ignore[call-arg]
+                trigger_0_pretime=pre_time,  # type: ignore[call-arg]
+                trigger_0_posttime=post_time,  # type: ignore[call-arg]
             )
             if comment:
                 comment = f"1. {comment}"
                 comment = comment_template.format(comment)
                 trigger.comment = comment
 
-            group.trigger = trigger
+            gp.trigger = trigger
 
     @overload
     def append(
@@ -1068,7 +1070,7 @@ class MDF3(MDF_Common):
         signals: Union[list[Signal], Signal],
         comment: str = ...,
         common_timebase: bool = ...,
-        units: Optional[dict[str, Union[bytes, str]]] = ...,
+        units: Optional[dict[str, str]] = ...,
     ) -> int: ...
 
     @overload
@@ -1077,7 +1079,7 @@ class MDF3(MDF_Common):
         signals: DataFrame,
         comment: str = ...,
         common_timebase: bool = ...,
-        units: Optional[dict[str, Union[bytes, str]]] = ...,
+        units: Optional[dict[str, str]] = ...,
     ) -> None: ...
 
     def append(
@@ -1085,7 +1087,7 @@ class MDF3(MDF_Common):
         signals: Union[list[Signal], Signal, DataFrame],
         comment: str = "Python",
         common_timebase: bool = False,
-        units: Optional[dict[str, Union[bytes, str]]] = None,
+        units: Optional[dict[str, str]] = None,
     ) -> Optional[int]:
         """Appends a new data group.
 
@@ -1140,7 +1142,7 @@ class MDF3(MDF_Common):
             signals = [signals]
         elif isinstance(signals, DataFrame):
             self._append_dataframe(signals, comment=comment, units=units)
-            return
+            return None
 
         version = self.version
         integer_interp_mode = self._integer_interpolation
@@ -1159,7 +1161,7 @@ class MDF3(MDF_Common):
                     different = False
 
                 if different:
-                    times = [s.timestamps for s in signals]
+                    times: Optional[list[NDArray[Any]]] = [s.timestamps for s in signals]
                     timestamps = unique(concatenate(times)).astype(float64)
                     signals = [
                         s.interp(
@@ -1183,13 +1185,13 @@ class MDF3(MDF_Common):
         file = self._tempfile
         tell = file.tell
 
-        kargs = {
+        ce_kargs: ChannelExtensionKwargs = {
             "module_nr": 0,
             "module_address": 0,
             "type": v23c.SOURCE_ECU,
             "description": b"Channel inserted by Python Script",
         }
-        ce_block = ChannelExtension(**kargs)
+        ce_block = ChannelExtension(**ce_kargs)
 
         canopen_time_fields = ("ms", "days")
         canopen_date_fields = (
@@ -1205,9 +1207,10 @@ class MDF3(MDF_Common):
 
         dg_cntr = len(self.groups)
 
-        gp = Group(None)
+        gp = Group(DataGroup())
         gp.channels = gp_channels = []
-        gp.channel_dependencies = gp_dep = []
+        gp_dep: list[Optional[ChannelDependency]] = []
+        gp.channel_dependencies = gp_dep
         gp.signal_types = gp_sig_types = []
         gp.string_dtypes = []
         gp.record = record = []
@@ -1232,19 +1235,19 @@ class MDF3(MDF_Common):
 
         if signals:
             # conversion for time channel
-            kargs = {
+            cc_kargs: ChannelConversionKwargs = {
                 "conversion_type": v23c.CONVERSION_TYPE_NONE,
                 "unit": b"s",
                 "min_phy_value": timestamps[0] if cycles_nr else 0,
                 "max_phy_value": timestamps[-1] if cycles_nr else 0,
             }
-            conversion = ChannelConversion(**kargs)
+            conversion = ChannelConversion(**cc_kargs)
             conversion.unit = "s"
             source = ce_block
 
             # time channel
             t_type, t_size = fmt_to_datatype_v3(timestamps.dtype, timestamps.shape)
-            kargs = {
+            cn_kargs: ChannelKwargs = {
                 "short_name": time_name.encode("latin-1"),
                 "channel_type": v23c.CHANNEL_TYPE_MASTER,
                 "data_type": t_type,
@@ -1253,9 +1256,8 @@ class MDF3(MDF_Common):
                 "max_raw_value": timestamps[-1] if cycles_nr else 0,
                 "bit_count": t_size,
                 "block_len": channel_size,
-                "version": version,
             }
-            channel = Channel(**kargs)
+            channel = Channel(**cn_kargs)
             channel.name = name = time_name
             channel.conversion = conversion
             channel.source = source
@@ -1316,19 +1318,19 @@ class MDF3(MDF_Common):
                 if signal.source:
                     source = signal.source
                     if source.source_type != 2:
-                        kargs = {
+                        ce_kargs = {
                             "type": v23c.SOURCE_ECU,
                             "description": source.name.encode("latin-1"),
                             "ECU_identification": source.path.encode("latin-1"),
                         }
                     else:
-                        kargs = {
+                        ce_kargs = {
                             "type": v23c.SOURCE_VECTOR,
                             "message_name": source.name.encode("latin-1"),
                             "sender_name": source.path.encode("latin-1"),
                         }
 
-                    new_source = ChannelExtension(**kargs)
+                    new_source = ChannelExtension(**ce_kargs)
 
                 else:
                     new_source = ce_block
@@ -1352,7 +1354,7 @@ class MDF3(MDF_Common):
                 else:
                     s_size_ = s_size
 
-                kargs = {
+                cn_kargs = {
                     "channel_type": v23c.CHANNEL_TYPE_VALUE,
                     "data_type": s_type,
                     "start_offset": start_bit_offset,
@@ -1364,7 +1366,7 @@ class MDF3(MDF_Common):
 
                 s_size = max(s_size, 8)
 
-                channel = Channel(**kargs)
+                channel = Channel(**cn_kargs)
                 channel.name = signal.name
                 channel.comment = signal.comment
                 channel.source = new_source
@@ -1429,20 +1431,20 @@ class MDF3(MDF_Common):
                 new_field_names = UniqueDB()
 
                 # conversion for time channel
-                kargs = {
+                cc_kargs = {
                     "conversion_type": v23c.CONVERSION_TYPE_NONE,
                     "unit": b"s",
                     "min_phy_value": timestamps[0] if cycles_nr else 0,
                     "max_phy_value": timestamps[-1] if cycles_nr else 0,
                 }
-                conversion = ChannelConversion(**kargs)
+                conversion = ChannelConversion(**cc_kargs)
                 conversion.unit = "s"
 
                 source = ce_block
 
                 # time channel
                 t_type, t_size = fmt_to_datatype_v3(timestamps.dtype, timestamps.shape)
-                kargs = {
+                cn_kargs = {
                     "short_name": time_name.encode("latin-1"),
                     "channel_type": v23c.CHANNEL_TYPE_MASTER,
                     "data_type": t_type,
@@ -1453,7 +1455,7 @@ class MDF3(MDF_Common):
                     "block_len": channel_size,
                     "version": version,
                 }
-                channel = Channel(**kargs)
+                channel = Channel(**cn_kargs)
                 channel.name = name = time_name
                 channel.source = source
                 channel.conversion = conversion
@@ -1514,31 +1516,31 @@ class MDF3(MDF_Common):
 
                     # conversions for channel
 
-                    kargs = {
+                    cc_kargs = {
                         "conversion_type": v23c.CONVERSION_TYPE_NONE,
                         "unit": signal.unit.encode("latin-1"),
                         "min_phy_value": 0,
                         "max_phy_value": 0,
                     }
-                    conversion = ChannelConversion(**kargs)
+                    conversion = ChannelConversion(**cc_kargs)
 
                     # source for channel
                     if signal.source:
                         source = signal.source
                         if source.source_type != 2:
-                            kargs = {
+                            ce_kargs = {
                                 "type": v23c.SOURCE_ECU,
                                 "description": source.name.encode("latin-1"),
                                 "ECU_identification": source.path.encode("latin-1"),
                             }
                         else:
-                            kargs = {
+                            ce_kargs = {
                                 "type": v23c.SOURCE_VECTOR,
                                 "message_name": source.name.encode("latin-1"),
                                 "sender_name": source.path.encode("latin-1"),
                             }
 
-                        source = ChannelExtension(**kargs)
+                        source = ChannelExtension(**ce_kargs)
 
                     else:
                         source = ce_block
@@ -1552,7 +1554,7 @@ class MDF3(MDF_Common):
                         additional_byte_offset = 0
                     s_type, s_size = fmt_to_datatype_v3(samples.dtype, samples.shape)
 
-                    kargs = {
+                    cn_kargs = {
                         "channel_type": v23c.CHANNEL_TYPE_VALUE,
                         "data_type": s_type,
                         "start_offset": start_bit_offset,
@@ -1564,7 +1566,7 @@ class MDF3(MDF_Common):
 
                     s_size = max(s_size, 8)
 
-                    channel = Channel(**kargs)
+                    channel = Channel(**cn_kargs)
                     channel.name = name
                     channel.source = source
                     channel.conversion = conversion
@@ -1585,12 +1587,12 @@ class MDF3(MDF_Common):
                     new_gp_dep.append(None)
 
                 # channel group
-                kargs = {
+                cg_kargs = {
                     "cycles_nr": cycles_nr,
                     "samples_byte_nr": new_offset // 8,
                     "ch_nr": new_ch_cntr,
                 }
-                new_gp.channel_group = ChannelGroup(**kargs)
+                new_gp.channel_group = ChannelGroup(**cg_kargs)
                 new_gp.channel_group.comment = channel_group_comment
 
                 # data group
@@ -1687,29 +1689,29 @@ class MDF3(MDF_Common):
 
                 # add channel dependency block for composed parent channel
                 sd_nr = len(component_samples)
-                kargs = {"sd_nr": sd_nr}
+                cd_kargs = {"sd_nr": sd_nr}
                 for i, dim in enumerate(shape[::-1]):
-                    kargs[f"dim_{i}"] = dim
-                parent_dep = ChannelDependency(**kargs)
+                    cd_kargs[f"dim_{i}"] = dim
+                parent_dep = ChannelDependency(**cd_kargs)
                 new_gp_dep.append(parent_dep)
 
                 # source for channel
                 if signal.source:
                     source = signal.source
                     if source.source_type != 2:
-                        kargs = {
+                        ce_kargs = {
                             "type": v23c.SOURCE_ECU,
                             "description": source.name.encode("latin-1"),
                             "ECU_identification": source.path.encode("latin-1"),
                         }
                     else:
-                        kargs = {
+                        ce_kargs = {
                             "type": v23c.SOURCE_VECTOR,
                             "message_name": source.name.encode("latin-1"),
                             "sender_name": source.path.encode("latin-1"),
                         }
 
-                    source = ChannelExtension(**kargs)
+                    source = ChannelExtension(**ce_kargs)
 
                 else:
                     source = ce_block
@@ -1723,7 +1725,7 @@ class MDF3(MDF_Common):
                     start_bit_offset = offset
                     additional_byte_offset = 0
 
-                kargs = {
+                cn_kargs = {
                     "channel_type": v23c.CHANNEL_TYPE_VALUE,
                     "data_type": s_type,
                     "start_offset": start_bit_offset,
@@ -1737,7 +1739,7 @@ class MDF3(MDF_Common):
 
                 new_record.append(None)
 
-                channel = Channel(**kargs)
+                channel = Channel(**cn_kargs)
                 channel.comment = signal.comment
                 channel.display_names = signal.display_names
 
@@ -1763,19 +1765,19 @@ class MDF3(MDF_Common):
                     if signal.source:
                         source = signal.source
                         if source.source_type != 2:
-                            kargs = {
+                            ce_kargs = {
                                 "type": v23c.SOURCE_ECU,
                                 "description": source.name.encode("latin-1"),
                                 "ECU_identification": source.path.encode("latin-1"),
                             }
                         else:
-                            kargs = {
+                            ce_kargs = {
                                 "type": v23c.SOURCE_VECTOR,
                                 "message_name": source.name.encode("latin-1"),
                                 "sender_name": source.path.encode("latin-1"),
                             }
 
-                        source = ChannelExtension(**kargs)
+                        source = ChannelExtension(**ce_kargs)
                     else:
                         source = ce_block
 
@@ -1796,7 +1798,7 @@ class MDF3(MDF_Common):
                         )
                     )
 
-                    kargs = {
+                    cn_kargs = {
                         "channel_type": v23c.CHANNEL_TYPE_VALUE,
                         "data_type": s_type,
                         "start_offset": start_bit_offset,
@@ -1809,7 +1811,7 @@ class MDF3(MDF_Common):
 
                     s_size = max(s_size, 8)
 
-                    channel = Channel(**kargs)
+                    channel = Channel(**cn_kargs)
                     channel.name = name
                     channel.source = source
                     new_gp_channels.append(channel)
@@ -1851,29 +1853,29 @@ class MDF3(MDF_Common):
 
                     # add channel dependency block for composed parent channel
                     sd_nr = len(component_samples)
-                    kargs = {"sd_nr": sd_nr}
+                    cd_kargs = {"sd_nr": sd_nr}
                     for i, dim in enumerate(shape[::-1]):
-                        kargs[f"dim_{i}"] = dim
-                    parent_dep = ChannelDependency(**kargs)
+                        cd_kargs[f"dim_{i}"] = dim
+                    parent_dep = ChannelDependency(**cd_kargs)
                     new_gp_dep.append(parent_dep)
 
                     # source for channel
                     if signal.source:
                         source = signal.source
                         if source.source_type != 2:
-                            kargs = {
+                            ce_kargs = {
                                 "type": v23c.SOURCE_ECU,
                                 "description": source.name.encode("latin-1"),
                                 "ECU_identification": source.path.encode("latin-1"),
                             }
                         else:
-                            kargs = {
+                            ce_kargs = {
                                 "type": v23c.SOURCE_VECTOR,
                                 "message_name": source.name.encode("latin-1"),
                                 "sender_name": source.path.encode("latin-1"),
                             }
 
-                        source = ChannelExtension(**kargs)
+                        source = ChannelExtension(**ce_kargs)
 
                     else:
                         source = ce_block
@@ -1887,7 +1889,7 @@ class MDF3(MDF_Common):
                         start_bit_offset = new_offset
                         additional_byte_offset = 0
 
-                    kargs = {
+                    cn_kargs = {
                         "channel_type": v23c.CHANNEL_TYPE_VALUE,
                         "data_type": s_type,
                         "start_offset": start_bit_offset,
@@ -1901,7 +1903,7 @@ class MDF3(MDF_Common):
 
                     new_record.append(None)
 
-                    channel = Channel(**kargs)
+                    channel = Channel(**cn_kargs)
                     channel.name = name
                     channel.comment = signal.comment
                     channel.source = source
@@ -1927,19 +1929,19 @@ class MDF3(MDF_Common):
                         if signal.source:
                             source = signal.source
                             if source.source_type != 2:
-                                kargs = {
+                                ce_kargs = {
                                     "type": v23c.SOURCE_ECU,
                                     "description": source.name.encode("latin-1"),
                                     "ECU_identification": source.path.encode("latin-1"),
                                 }
                             else:
-                                kargs = {
+                                ce_kargs = {
                                     "type": v23c.SOURCE_VECTOR,
                                     "message_name": source.name.encode("latin-1"),
                                     "sender_name": source.path.encode("latin-1"),
                                 }
 
-                            source = ChannelExtension(**kargs)
+                            source = ChannelExtension(**ce_kargs)
 
                         else:
                             source = ce_block
@@ -1952,7 +1954,7 @@ class MDF3(MDF_Common):
                             start_bit_offset = new_offset
                             additional_byte_offset = 0
 
-                        kargs = {
+                        cn_kargs = {
                             "channel_type": v23c.CHANNEL_TYPE_VALUE,
                             "data_type": s_type,
                             "start_offset": start_bit_offset,
@@ -1974,7 +1976,7 @@ class MDF3(MDF_Common):
                             )
                         )
 
-                        channel = Channel(**kargs)
+                        channel = Channel(**cn_kargs)
                         channel.name = name
                         channel.source = source
                         new_gp_channels.append(channel)
@@ -1996,12 +1998,12 @@ class MDF3(MDF_Common):
                         ch_cntr += 1
 
                 # channel group
-                kargs = {
+                cg_kargs = {
                     "cycles_nr": cycles_nr,
                     "samples_byte_nr": new_offset // 8,
                     "ch_nr": new_ch_cntr,
                 }
-                new_gp.channel_group = ChannelGroup(**kargs)
+                new_gp.channel_group = ChannelGroup(**cg_kargs)
                 new_gp.channel_group.comment = "From mdf v4 channel array"
 
                 # data group
@@ -2042,16 +2044,16 @@ class MDF3(MDF_Common):
                 new_gp.trigger = None
 
         # channel group
-        kargs = {
+        cg_kargs = {
             "cycles_nr": cycles_nr,
             "samples_byte_nr": offset // 8,
             "ch_nr": ch_cntr,
         }
         if self.version >= "3.30":
-            kargs["block_len"] = v23c.CG_POST_330_BLOCK_SIZE
+            cg_kargs["block_len"] = v23c.CG_POST_330_BLOCK_SIZE
         else:
-            kargs["block_len"] = v23c.CG_PRE_330_BLOCK_SIZE
-        gp.channel_group = ChannelGroup(**kargs)
+            cg_kargs["block_len"] = v23c.CG_PRE_330_BLOCK_SIZE
+        gp.channel_group = ChannelGroup(**cg_kargs)
         gp.channel_group.comment = comment
 
         # data group
@@ -2135,13 +2137,13 @@ class MDF3(MDF_Common):
         file = self._tempfile
         tell = file.tell
 
-        kargs = {
+        ce_kargs = {
             "module_nr": 0,
             "module_address": 0,
             "type": v23c.SOURCE_ECU,
             "description": b"Channel inserted by Python Script",
         }
-        ce_block = ChannelExtension(**kargs)
+        ce_block = ChannelExtension(**ce_kargs)
 
         dg_cntr = len(self.groups)
 
@@ -2163,19 +2165,19 @@ class MDF3(MDF_Common):
 
         if df.shape[0]:
             # conversion for time channel
-            kargs = {
+            cc_kargs = {
                 "conversion_type": v23c.CONVERSION_TYPE_NONE,
                 "unit": b"s",
                 "min_phy_value": timestamps[0] if cycles_nr else 0,
                 "max_phy_value": timestamps[-1] if cycles_nr else 0,
             }
-            conversion = ChannelConversion(**kargs)
+            conversion = ChannelConversion(**cc_kargs)
             conversion.unit = "s"
             source = ce_block
 
             # time channel
             t_type, t_size = fmt_to_datatype_v3(timestamps.dtype, timestamps.shape)
-            kargs = {
+            cn_kargs = {
                 "short_name": time_name.encode("latin-1"),
                 "channel_type": v23c.CHANNEL_TYPE_MASTER,
                 "data_type": t_type,
@@ -2186,7 +2188,7 @@ class MDF3(MDF_Common):
                 "block_len": channel_size,
                 "version": version,
             }
-            channel = Channel(**kargs)
+            channel = Channel(**cn_kargs)
             channel.name = name = time_name
             channel.conversion = conversion
             channel.source = source

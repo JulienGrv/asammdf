@@ -2550,7 +2550,7 @@ class ChannelConversion(_ChannelConversionBase):
                 ) = v4c.CONVERSION_NONE_INIT_uf(tx_block, 0)
 
                 nr = self.val_param_nr
-                values: tuple[int, ...] = unpack_from(f"<{nr}d", tx_block, 56)
+                values: tuple[float, ...] = unpack_from(f"<{nr}d", tx_block, 56)
                 for i in range(nr // 2):
                     self[f"raw_{i}"], self[f"phys_{i}"] = (
                         values[i * 2],

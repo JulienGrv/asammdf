@@ -2,10 +2,11 @@
 asammdf utility functions for channel conversions
 """
 
-from __future__ import annotations
-
 from copy import deepcopy
-from typing import Any
+import typing
+from typing import Any, Optional, overload, Union
+
+from typing_extensions import Literal
 
 from ..types import ChannelConversionType
 from . import v2_v3_blocks as v3b
@@ -14,8 +15,20 @@ from . import v4_blocks as v4b
 from . import v4_constants as v4c
 
 
+@overload
 def conversion_transfer(
-    conversion: ChannelConversionType, version: int = 3, copy: bool = False
+    conversion: Optional[ChannelConversionType], version: Literal[3] = ..., copy: bool = False
+) -> v3b.ChannelConversion: ...
+
+
+@overload
+def conversion_transfer(
+    conversion: Optional[ChannelConversionType], version: int = ..., copy: bool = False
+) -> ChannelConversionType: ...
+
+
+def conversion_transfer(
+    conversion: Optional[ChannelConversionType], version: int = 3, copy: bool = False
 ) -> ChannelConversionType:
     """convert between mdf4 and mdf3 channel conversions
 
@@ -38,7 +51,7 @@ def conversion_transfer(
     if version <= 3:
         if conversion is None:
             conversion = v3b.ChannelConversion(conversion_type=v3c.CONVERSION_TYPE_NONE)
-        else:
+        elif isinstance(conversion, v4b.ChannelConversion):
             conversion_type = conversion["conversion_type"]
             if conversion.id == b"CC":
                 if copy:
@@ -70,30 +83,25 @@ def conversion_transfer(
                     )
 
                 elif conversion_type == v4c.CONVERSION_TYPE_TAB:
-                    conversion_ = {}
+                    conversion_: v3b.ChannelConversionKwargs = {
+                        "unit": unit,
+                        "conversion_type": v3c.CONVERSION_TYPE_TAB,
+                    }
                     conversion_["ref_param_nr"] = conversion.val_param_nr // 2
                     for i in range(conversion.val_param_nr // 2):
-                        conversion_[f"raw_{i}"] = conversion[f"raw_{i}"]
-                        conversion_[f"phys_{i}"] = conversion[f"phys_{i}"]
+                        conversion_[f"raw_{i}"] = conversion[f"raw_{i}"]  # type: ignore[literal-required]
+                        conversion_[f"phys_{i}"] = conversion[f"phys_{i}"]  # type: ignore[literal-required]
 
-                    conversion = v3b.ChannelConversion(
-                        unit=unit,
-                        conversion_type=v3c.CONVERSION_TYPE_TAB,
-                        **conversion_,
-                    )
+                    conversion = v3b.ChannelConversion(**conversion_)
 
                 elif conversion_type == v4c.CONVERSION_TYPE_TABI:
-                    conversion_ = {}
+                    conversion_ = {"unit": unit, "conversion_type": v3c.CONVERSION_TYPE_TABI}
                     conversion_["ref_param_nr"] = conversion.val_param_nr // 2
                     for i in range(conversion.val_param_nr // 2):
-                        conversion_[f"raw_{i}"] = conversion[f"raw_{i}"]
-                        conversion_[f"phys_{i}"] = conversion[f"phys_{i}"]
+                        conversion_[f"raw_{i}"] = conversion[f"raw_{i}"]  # type: ignore[literal-required]
+                        conversion_[f"phys_{i}"] = conversion[f"phys_{i}"]  # type: ignore[literal-required]
 
-                    conversion = v3b.ChannelConversion(
-                        unit=unit,
-                        conversion_type=v3c.CONVERSION_TYPE_TABI,
-                        **conversion_,
-                    )
+                    conversion = v3b.ChannelConversion(**conversion_)
 
                 elif conversion_type == v4c.CONVERSION_TYPE_ALG:
                     formula = conversion.formula.replace("X", "X1")
@@ -105,21 +113,22 @@ def conversion_transfer(
 
                 elif conversion_type == v4c.CONVERSION_TYPE_RTAB:
                     nr = (conversion.val_param_nr - 1) // 3
-                    kargs = {
+                    kargs: v3b.ChannelConversionKwargs = {
+                        "unit": unit,
                         "ref_param_nr": nr,
                         "conversion_type": v3c.CONVERSION_TYPE_TABI,
                     }
 
                     for i in range(nr):
                         l_ = conversion[f"lower_{i}"]
-                        u_ = conversion[f"upper_{i}"]
+                        u_ = typing.cast(float, conversion[f"upper_{i}"])
                         p_ = conversion[f"phys_{i}"]
-                        kargs[f"raw_{i}"] = l_
-                        kargs[f"raw_{i}"] = u_ - 0.000_001
-                        kargs[f"phys_{i}"] = p_
-                        kargs[f"phys_{i}"] = p_
+                        kargs[f"raw_{i}"] = l_  # type: ignore[literal-required]
+                        kargs[f"raw_{i}"] = u_ - 0.000_001  # type: ignore[literal-required]
+                        kargs[f"phys_{i}"] = p_  # type: ignore[literal-required]
+                        kargs[f"phys_{i}"] = p_  # type: ignore[literal-required]
 
-                    conversion = v3b.ChannelConversion(unit=unit, **kargs)
+                    conversion = v3b.ChannelConversion(**kargs)
 
                 elif conversion_type == v4c.CONVERSION_TYPE_TABX:
                     nr = conversion.val_param_nr
@@ -130,8 +139,8 @@ def conversion_transfer(
                         "conversion_type": v3c.CONVERSION_TYPE_RTABX,
                     }
                     for i in range(nr):
-                        kargs[f"lower_{i}"] = conversion[f"val_{i}"]
-                        kargs[f"upper_{i}"] = conversion[f"val_{i}"]
+                        kargs[f"lower_{i}"] = conversion[f"val_{i}"]  # type: ignore[literal-required]
+                        kargs[f"upper_{i}"] = conversion[f"val_{i}"]  # type: ignore[literal-required]
                         if isinstance(
                             conversion.referenced_blocks[f"text_{i}"],
                             v4b.ChannelConversion,
@@ -160,8 +169,8 @@ def conversion_transfer(
                         "conversion_type": v3c.CONVERSION_TYPE_RTABX,
                     }
                     for i in range(nr):
-                        kargs[f"lower_{i}"] = conversion[f"lower_{i}"]
-                        kargs[f"upper_{i}"] = conversion[f"upper_{i}"]
+                        kargs[f"lower_{i}"] = conversion[f"lower_{i}"]  # type: ignore[literal-required]
+                        kargs[f"upper_{i}"] = conversion[f"upper_{i}"]  # type: ignore[literal-required]
                         if isinstance(
                             conversion.referenced_blocks[f"text_{i}"],
                             v4b.ChannelConversion,
@@ -266,7 +275,7 @@ def conversion_transfer(
     return conversion
 
 
-def inverse_conversion(conversion: ChannelConversionType | dict | None) -> v4b.ChannelConversion | None:
+def inverse_conversion(conversion: Optional[Union[ChannelConversionType, dict]]) -> Optional[v4b.ChannelConversion]:
 
     if isinstance(conversion, v3b.ChannelConversion):
         conversion = conversion_transfer(conversion, version=4)
@@ -326,7 +335,7 @@ def inverse_conversion(conversion: ChannelConversionType | dict | None) -> v4b.C
     return conv
 
 
-def from_dict(conversion_dict: dict[str, Any]) -> v4b.ChannelConversion | None:
+def from_dict(conversion_dict: dict[str, Any]) -> Optional[v4b.ChannelConversion]:
     conversion_dict = dict(conversion_dict)
 
     if not conversion_dict:
@@ -448,7 +457,7 @@ def from_dict(conversion_dict: dict[str, Any]) -> v4b.ChannelConversion | None:
     return conversion
 
 
-def to_dict(conversion: ChannelConversionType) -> dict | None:
+def to_dict(conversion: ChannelConversionType) -> Optional[dict]:
     if not conversion:
         return None
 

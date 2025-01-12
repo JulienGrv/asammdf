@@ -1774,7 +1774,7 @@ address: {hex(self.address)}
         return f"ChannelConversion (referenced blocks: {self.referenced_blocks}, address: {hex(self.address)}, fields: {fields})"
 
 
-class _ChannelDependencyKwargs(BlockKwargs, total=False):
+class ChannelDependencyKwargs(BlockKwargs, total=False):
     sd_nr: int
 
 
@@ -1813,7 +1813,7 @@ class ChannelDependency:
 
     """
 
-    def __init__(self, **kwargs: Unpack[_ChannelDependencyKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[ChannelDependencyKwargs]) -> None:
         super().__init__()
 
         self.referenced_channels: list[tuple[int, int]] = []
@@ -1888,7 +1888,7 @@ class ChannelDependency:
         return result
 
 
-class _ChannelExtensionKwargs(BlockKwargs, total=False):
+class ChannelExtensionKwargs(BlockKwargs, total=False):
     raw_bytes: bytes
     block_len: int
     type: int
@@ -1967,7 +1967,7 @@ class ChannelExtension:
         "type",
     )
 
-    def __init__(self, **kwargs: Unpack[_ChannelExtensionKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[ChannelExtensionKwargs]) -> None:
         super().__init__()
 
         self.name = self.path = self.comment = ""
@@ -2450,7 +2450,7 @@ comment: {self.comment}
         return "\n".join(metadata)
 
 
-class _DataBlockKwargs(BlockKwargs, total=False):
+class DataBlockKwargs(BlockKwargs, total=False):
     size: int
     data: bytes
 
@@ -2476,7 +2476,7 @@ class DataBlock:
 
     __slots__ = "address", "data"
 
-    def __init__(self, **kwargs: Unpack[_DataBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[DataBlockKwargs]) -> None:
         super().__init__()
 
         try:
@@ -2501,7 +2501,7 @@ class DataBlock:
         return self.data
 
 
-class _DataGroupKwargs(BlockKwargs, total=False):
+class DataGroupKwargs(BlockKwargs, total=False):
     block_len: int
     next_dg_addr: int
     first_cg_addr: int
@@ -2555,7 +2555,7 @@ class DataGroup:
         "trigger_addr",
     )
 
-    def __init__(self, **kwargs: Unpack[_DataGroupKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[DataGroupKwargs]) -> None:
         super().__init__()
 
         try:
@@ -2635,7 +2635,7 @@ class DataGroup:
         return result
 
 
-class _FileIdentificationBlock(BlockKwargs, total=False):
+class FileIdentificationBlockKwargs(BlockKwargs, total=False):
     version: str
 
 
@@ -2685,7 +2685,7 @@ class FileIdentificationBlock:
         "version_str",
     )
 
-    def __init__(self, **kwargs: Unpack[_FileIdentificationBlock]) -> None:
+    def __init__(self, **kwargs: Unpack[FileIdentificationBlockKwargs]) -> None:
         super().__init__()
 
         self.address = 0
@@ -2731,7 +2731,7 @@ class FileIdentificationBlock:
         return result
 
 
-class _HeaderBlockKwargs(BlockKwargs, total=False):
+class HeaderBlockKwargs(BlockKwargs, total=False):
     version: str
 
 
@@ -2790,7 +2790,7 @@ class HeaderBlock:
 
     """
 
-    def __init__(self, **kwargs: Unpack[_HeaderBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[HeaderBlockKwargs]) -> None:
         super().__init__()
 
         self.address = 64
@@ -3108,7 +3108,7 @@ class HeaderBlock:
         return result
 
 
-class _ProgramBlockKwargs(BlockKwargs, total=False):
+class ProgramBlockKwargs(BlockKwargs, total=False):
     data: bytes
 
 
@@ -3135,7 +3135,7 @@ class ProgramBlock:
 
     __slots__ = ("address", "block_len", "data", "id")
 
-    def __init__(self, **kwargs: Unpack[_ProgramBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[ProgramBlockKwargs]) -> None:
         super().__init__()
 
         try:
@@ -3169,7 +3169,7 @@ class ProgramBlock:
         return result
 
 
-class _TextBlockKwargs(BlockKwargs, total=False):
+class TextBlockKwargs(BlockKwargs, total=False):
     text: Union[bytes, str]
 
 
@@ -3208,7 +3208,7 @@ class TextBlock:
 
     __slots__ = ("address", "block_len", "id", "text")
 
-    def __init__(self, **kwargs: Unpack[_TextBlockKwargs]) -> None:
+    def __init__(self, **kwargs: Unpack[TextBlockKwargs]) -> None:
         super().__init__()
         try:
             stream = kwargs["stream"]

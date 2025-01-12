@@ -101,7 +101,7 @@ class Group(Generic[_DG, _CG, _CN]):
         self.data_group: _DG = data_group
         self.channel_group: _CG
         self.channels: list[_CN] = []
-        self.channel_dependencies: list[v3b.ChannelDependency] = []
+        self.channel_dependencies: list[Optional[v3b.ChannelDependency]] = []
         self.signal_data: list[Optional[tuple[list[SignalDataBlockInfo], Iterator[SignalDataBlockInfo]]]] = []
         self.record: list[Optional[tuple[np.dtype[Any], int, int, int]]] = []
         self.record_size: dict[int, int] = {}
